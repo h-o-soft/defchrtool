@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DEFCHR TOOL for Web</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        background-color: #1a1a2e;
+        color: #eaeaea;
+        font-family: monospace;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        min-height: 100vh;
+        padding: 20px;
+      }
+
+      h1 {
+        margin-bottom: 20px;
+        color: #00ff88;
+        text-shadow: 0 0 10px #00ff8855;
+      }
+
+      #canvas-container {
+        border: 2px solid #00ff88;
+        box-shadow: 0 0 20px #00ff8833;
+        background-color: #000;
+      }
+
+      canvas {
+        display: block;
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+      }
+
+      #status {
+        margin-top: 10px;
+        color: #888;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>DEFCHR TOOL for Web</h1>
+    <div id="canvas-container">
+      <canvas id="main-canvas"></canvas>
+    </div>
+    <div id="status">Loading...</div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
