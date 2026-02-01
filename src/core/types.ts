@@ -116,10 +116,10 @@ export const X1_BOX_CHARS = {
   HORIZONTAL: 0x90,   // ─ 横線
   VERTICAL: 0x91,     // │ 縦線
   CROSS: 0x96,        // ┼ 十字
-  TOP_RIGHT: 0x98,    // ┐ 右上角
-  BOTTOM_RIGHT: 0x99, // ┘ 右下角
-  BOTTOM_LEFT: 0x9A,  // └ 左下角
-  TOP_LEFT: 0x9B      // ┌ 左上角
+  TOP_RIGHT: 0x97,    // ┐ 右上角
+  BOTTOM_RIGHT: 0x98, // ┘ 右下角
+  BOTTOM_LEFT: 0x99,  // └ 左下角
+  TOP_LEFT: 0x9A      // ┌ 左上角
 } as const;
 
 /** X1 矢印文字コード */

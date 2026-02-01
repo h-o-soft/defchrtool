@@ -9,6 +9,7 @@ import {
   X1_BOX_CHARS,
   X1_ARROW_CHARS,
   EditMode,
+  Direction,
   X1Color
 } from '../core/types';
 
@@ -149,13 +150,14 @@ export class ScreenLayout {
    * @param editMode 現在の編集モード
    * @param currentCharCode 現在のキャラクターコード（未使用、互換性のため残す）
    * @param editChrCode EDIT CHR.で入力した文字コード
+   * @param lastDirection 最後のカーソル移動方向
    */
-  drawMenu(editMode: EditMode, _currentCharCode: number, editChrCode: number = 0): void {
+  drawMenu(editMode: EditMode, _currentCharCode: number, editChrCode: number = 0, lastDirection: Direction = Direction.RIGHT): void {
     const baseY = LAYOUT.MENU_Y;
     const editChrCodeHex = editChrCode.toString(16).toUpperCase().padStart(2, '0');
 
     // 1行目: ><^v..CURSOR MOVE   :0ｶﾗ7.POINT SET
-    this.drawMenuLine1(baseY);
+    this.drawMenuLine1(baseY, lastDirection);
 
     // 2行目: M.....EDIT MODE=X   :C....COLOR CHANGE
     this.drawMenuLine2(baseY + 1, editMode);
@@ -168,19 +170,28 @@ export class ScreenLayout {
 
     // 5行目: P.....PROGRAMMING   :T....TRANSFER
     this.drawMenuLine5(baseY + 4);
+
+    // 6行目: G.....GRID
+    this.drawMenuLine6(baseY + 5);
   }
 
   /**
    * メニュー1行目: カーソル移動、ポイントセット
+   * @param row 行番号
+   * @param lastDirection 最後のカーソル移動方向（この方向の矢印が赤くなる）
    */
-  private drawMenuLine1(row: number): void {
+  private drawMenuLine1(row: number, lastDirection: Direction): void {
     const y = row * CHAR_HEIGHT;
 
-    // 矢印文字で「><^v」
-    this.x1Renderer.drawChar(0 * CHAR_WIDTH, y, X1_ARROW_CHARS.RIGHT, X1_COLORS.WHITE);
-    this.x1Renderer.drawChar(1 * CHAR_WIDTH, y, X1_ARROW_CHARS.LEFT, X1_COLORS.WHITE);
-    this.x1Renderer.drawChar(2 * CHAR_WIDTH, y, X1_ARROW_CHARS.UP, X1_COLORS.WHITE);
-    this.x1Renderer.drawChar(3 * CHAR_WIDTH, y, X1_ARROW_CHARS.DOWN, X1_COLORS.WHITE);
+    // 矢印文字で「><^v」（最後に移動した方向は赤、それ以外は白）
+    this.x1Renderer.drawChar(0 * CHAR_WIDTH, y, X1_ARROW_CHARS.RIGHT,
+      lastDirection === Direction.RIGHT ? X1_COLORS.RED : X1_COLORS.WHITE);
+    this.x1Renderer.drawChar(1 * CHAR_WIDTH, y, X1_ARROW_CHARS.LEFT,
+      lastDirection === Direction.LEFT ? X1_COLORS.RED : X1_COLORS.WHITE);
+    this.x1Renderer.drawChar(2 * CHAR_WIDTH, y, X1_ARROW_CHARS.UP,
+      lastDirection === Direction.UP ? X1_COLORS.RED : X1_COLORS.WHITE);
+    this.x1Renderer.drawChar(3 * CHAR_WIDTH, y, X1_ARROW_CHARS.DOWN,
+      lastDirection === Direction.DOWN ? X1_COLORS.RED : X1_COLORS.WHITE);
 
     this.x1Renderer.drawText(4 * CHAR_WIDTH, y, '..CURSOR MOVE', X1_COLORS.WHITE);
 
@@ -290,6 +301,16 @@ export class ScreenLayout {
 
     // T....TRANSFER 全体が黄色
     this.x1Renderer.drawText(20 * CHAR_WIDTH, y, 'T....TRANSFER', X1_COLORS.YELLOW);
+  }
+
+  /**
+   * メニュー6行目: GRID
+   */
+  private drawMenuLine6(row: number): void {
+    const y = row * CHAR_HEIGHT;
+
+    // G.....GRID 全体が緑
+    this.x1Renderer.drawText(0 * CHAR_WIDTH, y, 'G.....GRID', X1_COLORS.GREEN);
   }
 
   /**

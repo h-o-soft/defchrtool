@@ -18,6 +18,7 @@ export type InputEventType =
   | 'draw-dot'
   | 'color-select'
   | 'toggle-draw'
+  | 'toggle-grid'
   | 'mode-change'
   | 'direction-change'
   | 'edit-chr'
@@ -48,15 +49,73 @@ export type InputEventCallback = (event: InputEvent) => void;
 export class InputHandler {
   private mode: InputMode = 'edit';
   private callbacks: Set<InputEventCallback> = new Set();
-  // 将来の拡張用（カスタムUI入力バッファ）
-  // private inputBuffer: string = '';
   private promptCallback: ((value: string | null) => void) | null = null;
 
   /** 現在押されているキー */
   private pressedKeys: Set<string> = new Set();
 
+  /** 入力UI要素 */
+  private inputArea: HTMLElement | null = null;
+  private inputLabel: HTMLElement | null = null;
+  private inputField: HTMLInputElement | null = null;
+
   constructor() {
     this.setupListeners();
+    this.setupInputUI();
+  }
+
+  /**
+   * 入力UIの初期化
+   */
+  private setupInputUI(): void {
+    this.inputArea = document.getElementById('input-area');
+    this.inputLabel = document.getElementById('input-label');
+    this.inputField = document.getElementById('input-field') as HTMLInputElement;
+
+    if (this.inputField) {
+      // Enterで確定
+      this.inputField.addEventListener('keydown', (e) => {
+        if (e.code === 'Enter') {
+          e.preventDefault();
+          this.completeInput(this.inputField!.value);
+        } else if (e.code === 'Escape') {
+          e.preventDefault();
+          this.completeInput(null);
+        }
+      });
+    }
+  }
+
+  /**
+   * 入力UIを表示
+   */
+  private showInputUI(label: string): void {
+    if (this.inputArea && this.inputLabel && this.inputField) {
+      this.inputLabel.textContent = label;
+      this.inputField.value = '';
+      this.inputArea.classList.add('visible');
+      this.inputField.focus();
+    }
+  }
+
+  /**
+   * 入力UIを非表示
+   */
+  private hideInputUI(): void {
+    if (this.inputArea && this.inputField) {
+      this.inputArea.classList.remove('visible');
+      this.inputField.blur();
+    }
+  }
+
+  /**
+   * 入力完了処理
+   */
+  private completeInput(value: string | null): void {
+    this.hideInputUI();
+    if (this.promptCallback) {
+      this.promptCallback(value);
+    }
   }
 
   /**
@@ -73,6 +132,11 @@ export class InputHandler {
   private handleKeyDown(event: KeyboardEvent): void {
     // IME入力中は無視
     if (event.isComposing) return;
+
+    // 入力欄にフォーカスがある場合は編集モードのキー処理をスキップ
+    if (document.activeElement === this.inputField) {
+      return;
+    }
 
     // リピートは一部のキー（矢印キー）のみ許可
     const allowRepeat = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
@@ -193,11 +257,11 @@ export class InputHandler {
         this.startEditChrInput();
         break;
 
-      // Cキー: EDIT CHR.
-      case 'KeyC':
-        event.preventDefault();
-        this.startCharCodeInput('editchr');
-        break;
+      // Cキー: COLOR CHANGE（将来実装予定、現在は無効）
+      // case 'KeyC':
+      //   event.preventDefault();
+      //   this.startCharCodeInput('editchr');
+      //   break;
 
       // Sキー: SET CHR.
       case 'KeyS':
@@ -209,6 +273,12 @@ export class InputHandler {
       case 'KeyD':
         event.preventDefault();
         this.emit({ type: 'direction-change' });
+        break;
+
+      // Gキー: GRID表示切り替え
+      case 'KeyG':
+        event.preventDefault();
+        this.emit({ type: 'toggle-grid' });
         break;
 
       // Escapeキー: キャンセル
@@ -225,7 +295,7 @@ export class InputHandler {
   private startCharCodeInput(mode: 'editchr' | 'setchr'): void {
     this.mode = mode;
 
-    // プロンプト表示用のコールバックを設定
+    // プロンプト表示用のラベル
     const promptMessage = mode === 'editchr'
       ? 'Edit character code=&h'
       : 'Set character code=&h';
@@ -235,7 +305,7 @@ export class InputHandler {
       this.mode = 'edit';
       this.promptCallback = null;
 
-      if (value !== null) {
+      if (value !== null && value.trim() !== '') {
         const charCode = parseInt(value, 16);
         if (!isNaN(charCode) && charCode >= 0 && charCode <= 255) {
           if (mode === 'editchr') {
@@ -244,16 +314,13 @@ export class InputHandler {
             this.emit({ type: 'set-chr', data: { charCode } });
           }
         }
+      } else {
+        this.emit({ type: 'cancel' });
       }
     };
 
-    // ブラウザのプロンプトを使用（Phase 5でカスタムUIに置換予定）
-    setTimeout(() => {
-      const input = prompt(promptMessage);
-      if (this.promptCallback) {
-        this.promptCallback(input);
-      }
-    }, 0);
+    // カスタム入力UIを表示
+    this.showInputUI(promptMessage);
   }
 
   /**
@@ -262,36 +329,53 @@ export class InputHandler {
    * 2. 文字コードを入力
    */
   private startEditChrInput(): void {
+    this.mode = 'editchr';
+
     // Step 1: ROMCG/RAMCG選択
-    setTimeout(() => {
-      const sourceInput = prompt('0..ROMCG  1..RAMCG');
-      if (sourceInput === null) {
-        return; // キャンセル
+    this.promptCallback = (sourceInput: string | null) => {
+      if (sourceInput === null || sourceInput.trim() === '') {
+        this.mode = 'edit';
+        this.promptCallback = null;
+        this.emit({ type: 'cancel' });
+        return;
       }
 
       const sourceNum = parseInt(sourceInput, 10);
       if (sourceNum !== 0 && sourceNum !== 1) {
-        return; // 無効な入力
+        this.mode = 'edit';
+        this.promptCallback = null;
+        this.emit({ type: 'cancel' });
+        return;
       }
 
       const source: 'rom' | 'ram' = sourceNum === 0 ? 'rom' : 'ram';
 
       // Step 2: 文字コード入力
-      setTimeout(() => {
-        const charCodeInput = prompt('Character code=&h');
-        if (charCodeInput === null) {
-          return; // キャンセル
+      this.promptCallback = (charCodeInput: string | null) => {
+        this.mode = 'edit';
+        this.promptCallback = null;
+
+        if (charCodeInput === null || charCodeInput.trim() === '') {
+          this.emit({ type: 'cancel' });
+          return;
         }
 
         const charCode = parseInt(charCodeInput, 16);
         if (isNaN(charCode) || charCode < 0 || charCode > 255) {
-          return; // 無効な入力
+          this.emit({ type: 'cancel' });
+          return;
         }
 
         // イベント発火
         this.emit({ type: 'load-chr', data: { source, charCode } });
-      }, 0);
-    }, 0);
+      };
+
+      // Step 2のUI表示
+      this.showInputUI('Character code=&h');
+    };
+
+    // Step 1のUI表示
+    this.showInputUI('0..ROMCG  1..RAMCG');
   }
 
   /**

@@ -186,6 +186,10 @@ class DEFCHRApp {
         this.cycleDirection();
         break;
 
+      case 'toggle-grid':
+        this.toggleGrid();
+        break;
+
       case 'edit-chr':
         this.handleEditChr(event.data!.charCode!);
         break;
@@ -288,6 +292,18 @@ class DEFCHRApp {
     const currentIndex = directions.indexOf(this.editorState.lastDirection);
     this.editorState.lastDirection = directions[(currentIndex + 1) % directions.length];
     this.showStatusMessage(`Direction: ${dirSymbols[this.editorState.lastDirection]}`);
+  }
+
+  /** グリッド表示状態 */
+  private gridVisible: boolean = true;
+
+  /**
+   * グリッド表示切り替え（Gキー）
+   */
+  private toggleGrid(): void {
+    this.gridVisible = !this.gridVisible;
+    this.editorRenderer.setShowGrid(this.gridVisible);
+    this.showStatusMessage(`Grid: ${this.gridVisible ? 'ON' : 'OFF'}`);
   }
 
   /**
@@ -550,14 +566,15 @@ class DEFCHRApp {
     this.screenLayout.drawMenu(
       this.editorState.editMode,
       this.editorState.currentCharCode,
-      this.editorState.editChrCode  // EDIT CHR.(XX)の表示用
+      this.editorState.editChrCode,  // EDIT CHR.(XX)の表示用
+      this.editorState.lastDirection  // カーソル移動方向
     );
 
-    // プレビュー表示（右下 座標35,23）
+    // プレビュー表示（右下 座標35,22）
     // 編集中の画像をリアルタイムで表示（カーソル位置に応じた文字を表示）
     this.editorRenderer.renderActualSize(
       35 * 8,  // x = 280
-      23 * 8,  // y = 184
+      22 * 8,  // y = 176
       0,  // 編集バッファのベースコードは常に0
       this.editorState.editMode,
       this.editorState.cursorPosition

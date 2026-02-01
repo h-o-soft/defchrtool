@@ -8,9 +8,7 @@ import {
   FONT_HEIGHT,
   X1_COLOR_RGB,
   X1Color,
-  X1_COLORS,
-  X1_BOX_CHARS,
-  X1_ARROW_CHARS
+  X1_COLORS
 } from '../core/types';
 import { CanvasManager } from './CanvasManager';
 
@@ -90,12 +88,12 @@ export class X1Renderer {
     }
 
     // 罫線文字と矢印文字を生成
-    this.initializeSpecialChars();
+    // this.initializeSpecialChars();
   }
 
-  /**
-   * 罫線文字と矢印文字をプログラムで生成
-   */
+  // NOTE: 以下のメソッドはフォント画像に罫線・矢印文字が含まれているため不要
+  // フォント画像のデータをそのまま使用する
+  /*
   private initializeSpecialChars(): void {
     if (!this.fontData) return;
 
@@ -244,9 +242,6 @@ export class X1Renderer {
     ]);
   }
 
-  /**
-   * フォントデータに文字パターンを設定
-   */
   private setCharData(charCode: number, pattern: number[]): void {
     if (!this.fontData || pattern.length !== 8) return;
     const offset = charCode * 8;
@@ -254,6 +249,7 @@ export class X1Renderer {
       this.fontData[offset + i] = pattern[i];
     }
   }
+  */
 
   /**
    * フォントがロード済みか確認

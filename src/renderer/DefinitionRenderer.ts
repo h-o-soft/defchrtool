@@ -71,13 +71,8 @@ export class DefinitionRenderer {
       this.drawCharacter(ctx, x, y, charCode);
     }
 
-    // 選択中のキャラクターをハイライト
-    this.drawSelection(ctx);
-
-    // 外枠
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(this.offsetX - 1, this.offsetY - 1, GRID_SIZE + 2, GRID_SIZE + 2);
+    // 選択中のキャラクターをハイライト（現在未使用）
+    // this.drawSelection(ctx);
   }
 
   /**

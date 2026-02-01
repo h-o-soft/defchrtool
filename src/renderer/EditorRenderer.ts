@@ -20,9 +20,6 @@ const DOT_SIZE = 8;
 /** グリッド線の色 */
 const GRID_COLOR = 'rgba(128, 128, 128, 0.5)';
 
-/** カーソルの色 */
-const CURSOR_COLOR = 'rgba(255, 255, 255, 0.8)';
-
 /** ●文字パターン (0xE0) - 8x8ドット */
 const CIRCLE_PATTERN = [
   0b00111100,
@@ -140,8 +137,10 @@ export class EditorRenderer {
       this.drawCursor(ctx, cursorPos, editMode);
     }
 
-    // 編集モードの範囲枠
-    this.drawEditModeFrame(ctx, editMode, cursorPos);
+    // 編集モードの範囲枠（グリッド表示時のみ）
+    if (this.showGrid) {
+      this.drawEditModeFrame(ctx, editMode, cursorPos);
+    }
   }
 
   /**
@@ -215,24 +214,23 @@ export class EditorRenderer {
   }
 
   /**
-   * カーソルを描画
+   * カーソルを描画（塗りつぶし矩形）
    */
   private drawCursor(ctx: CanvasRenderingContext2D, pos: Position, _editMode: EditMode): void {
-    ctx.strokeStyle = CURSOR_COLOR;
-    ctx.lineWidth = 2;
-
     const cursorX = this.offsetX + pos.x * DOT_SIZE;
     const cursorY = this.offsetY + pos.y * DOT_SIZE;
 
-    ctx.strokeRect(cursorX + 1, cursorY + 1, DOT_SIZE - 2, DOT_SIZE - 2);
+    // 塗りつぶし矩形（白）
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(cursorX, cursorY, DOT_SIZE, DOT_SIZE);
   }
 
   /**
-   * 編集モードに応じた範囲枠を描画
+   * 編集モードに応じた範囲枠を描画（編集エリアの外側に描画）
    */
   private drawEditModeFrame(ctx: CanvasRenderingContext2D, editMode: EditMode, cursorPos: Position): void {
     ctx.strokeStyle = 'rgba(0, 255, 255, 0.7)';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 1;
 
     let frameX = this.offsetX;
     let frameY = this.offsetY;
@@ -265,7 +263,8 @@ export class EditorRenderer {
         break;
     }
 
-    ctx.strokeRect(frameX + 1, frameY + 1, frameW - 2, frameH - 2);
+    // 外側に1ドット広げて描画（編集エリアの画像に重ならないように）
+    ctx.strokeRect(frameX - 1, frameY - 1, frameW + 2, frameH + 2);
   }
 
   /**

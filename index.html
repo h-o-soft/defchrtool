@@ -45,12 +45,58 @@
         color: #888;
         font-size: 12px;
       }
+
+      #input-area {
+        margin-top: 15px;
+        display: none;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 15px;
+        background-color: #2a2a4e;
+        border: 1px solid #00ff88;
+        border-radius: 4px;
+      }
+
+      #input-area.visible {
+        display: flex;
+      }
+
+      #input-area label {
+        color: #00ff88;
+        font-size: 14px;
+      }
+
+      #input-area input {
+        background-color: #1a1a2e;
+        border: 1px solid #00ff88;
+        color: #ffffff;
+        font-family: monospace;
+        font-size: 14px;
+        padding: 5px 10px;
+        width: 80px;
+        text-transform: uppercase;
+      }
+
+      #input-area input:focus {
+        outline: none;
+        box-shadow: 0 0 5px #00ff88;
+      }
+
+      #input-area .hint {
+        color: #888;
+        font-size: 12px;
+      }
     </style>
   </head>
   <body>
     <h1>DEFCHR TOOL for Web</h1>
     <div id="canvas-container">
       <canvas id="main-canvas"></canvas>
+    </div>
+    <div id="input-area">
+      <label id="input-label">Character code=&amp;h</label>
+      <input type="text" id="input-field" maxlength="2" placeholder="00">
+      <span class="hint">(Enter: OK / Esc: Cancel)</span>
     </div>
     <div id="status">Loading...</div>
     <script type="module" src="/src/main.ts"></script>
