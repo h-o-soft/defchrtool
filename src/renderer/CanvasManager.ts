@@ -71,10 +71,13 @@ export class CanvasManager {
    * キャンバスサイズを調整
    */
   private resize(): void {
-    // WIDTH40は正方形ドット、WIDTH80は横半分（縦長ドット）
-    const effectiveWidth = this.screenMode === 'WIDTH80' ? X1_WIDTH / 2 : X1_WIDTH;
+    // DEFCHR TOOLはWIDTH 40用（320x200）の描画領域を使用
+    // WIDTH40: 正方形ドット（320幅で表示）
+    // WIDTH80: 縦長ドット（160幅で表示 = 横半分に縮小）
+    const contentWidth = X1_WIDTH / 2;  // 320ピクセル
+    const displayWidth = this.screenMode === 'WIDTH80' ? contentWidth / 2 : contentWidth;
 
-    this.frontCanvas.width = effectiveWidth * this.scale;
+    this.frontCanvas.width = displayWidth * this.scale;
     this.frontCanvas.height = X1_HEIGHT * this.scale;
 
     // スケーリング後もピクセルパーフェクト
@@ -100,11 +103,12 @@ export class CanvasManager {
    * バックバッファをフロントバッファに転送
    */
   flip(): void {
-    // 描画領域は変わらず、表示幅だけ変わる
-    // WIDTH80では横半分に縮んで縦長ドットになる
+    // DEFCHR TOOLはWIDTH 40用なので左半分（320x200）のみ使用
+    // WIDTH80では同じ内容が横半分に縮んで縦長ドットになる
+    const contentWidth = X1_WIDTH / 2;  // 320ピクセル
     this.frontCtx.drawImage(
       this.backCanvas,
-      0, 0, X1_WIDTH, X1_HEIGHT,
+      0, 0, contentWidth, X1_HEIGHT,
       0, 0, this.frontCanvas.width, this.frontCanvas.height
     );
   }
