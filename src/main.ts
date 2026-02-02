@@ -9,7 +9,8 @@ import { EditorRenderer } from './renderer/EditorRenderer';
 import { DefinitionRenderer } from './renderer/DefinitionRenderer';
 import { ScreenLayout } from './renderer/ScreenLayout';
 import { PCGData } from './core/PCGData';
-import { InputHandler, InputEvent, RotationType, FileFormat, InputDeviceMode } from './input/InputHandler';
+import { InputHandler, InputEvent, RotationType, FileFormat, InputDeviceMode, ColorReduceMode } from './input/InputHandler';
+import { reduceColors, isExactX1Colors } from './core/ColorReducer';
 import {
   X1_COLORS,
   EditMode,
@@ -269,7 +270,8 @@ class DEFCHRApp {
         this.handleFileLoad(
           event.data!.file!.format,
           event.data!.file!.start,
-          event.data!.file!.basLoadMode
+          event.data!.file!.basLoadMode,
+          event.data!.file!.reduceMode
         );
         break;
 
@@ -890,7 +892,7 @@ class DEFCHRApp {
    */
   private handleFileSave(format: FileFormat, start: number, end: number): void {
     switch (format) {
-      case 'png':
+      case 'image':
         this.savePng();
         break;
       case 'bin':
@@ -908,10 +910,10 @@ class DEFCHRApp {
   /**
    * ファイル読み込み処理
    */
-  private handleFileLoad(format: FileFormat, start: number, basLoadMode?: 'start' | 'original'): void {
+  private handleFileLoad(format: FileFormat, start: number, basLoadMode?: 'start' | 'original', reduceMode?: ColorReduceMode): void {
     switch (format) {
-      case 'png':
-        this.loadPng();
+      case 'image':
+        this.loadImage(reduceMode || 'none');
         break;
       case 'bin':
         this.loadBin(start, false);
@@ -983,12 +985,13 @@ class DEFCHRApp {
   }
 
   /**
-   * PNG形式で読み込み
+   * 画像形式で読み込み（PNG, JPEG等）
+   * @param reduceMode 減色モード
    */
-  private loadPng(): void {
+  private loadImage(reduceMode: ColorReduceMode): void {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'image/png';
+    input.accept = 'image/png,image/jpeg,image/gif,image/webp';
 
     input.onchange = async () => {
       const file = input.files?.[0];
@@ -1008,10 +1011,19 @@ class DEFCHRApp {
         const ctx = canvas.getContext('2d')!;
         ctx.drawImage(img, 0, 0, 128, 128);
         const imageData = ctx.getImageData(0, 0, 128, 128);
-        const data = imageData.data;
 
-        // X1の8色に変換するための閾値
-        const threshold = 128;
+        // 減色モードに応じて処理
+        let colorData: X1Color[][];
+        if (reduceMode === 'none' && isExactX1Colors(imageData)) {
+          // X1の8色のみで構成されている場合はそのまま変換
+          colorData = reduceColors(imageData, 'reduce');
+        } else if (reduceMode === 'none') {
+          // 8色以外が含まれているが'none'が指定された場合は'reduce'にフォールバック
+          console.log('[DEFCHRApp] Non-X1 colors detected, using reduce mode');
+          colorData = reduceColors(imageData, 'reduce');
+        } else {
+          colorData = reduceColors(imageData, reduceMode);
+        }
 
         // 256文字を読み込み
         for (let charCode = 0; charCode < 256; charCode++) {
@@ -1020,13 +1032,7 @@ class DEFCHRApp {
 
           for (let py = 0; py < 8; py++) {
             for (let px = 0; px < 8; px++) {
-              const i = ((charY + py) * 128 + (charX + px)) * 4;
-              const r = data[i] >= threshold ? 1 : 0;
-              const g = data[i + 1] >= threshold ? 1 : 0;
-              const b = data[i + 2] >= threshold ? 1 : 0;
-
-              // X1色に変換（bit0=B, bit1=R, bit2=G）
-              const color = (b | (r << 1) | (g << 2)) as X1Color;
+              const color = colorData[charY + py][charX + px];
               this.pcgData.setPixel(charCode, px, py, color);
             }
           }
@@ -1034,7 +1040,7 @@ class DEFCHRApp {
 
         // 定義エリアを更新
         this.definitionRenderer.render();
-        this.showStatusMessage(`Loaded: ${file.name}`);
+        this.showStatusMessage(`Loaded: ${file.name} (${reduceMode})`);
         this.scheduleSave();
       };
 

@@ -412,8 +412,8 @@
         <span class="form-label">Format:</span>
         <div class="radio-group">
           <label class="radio-label">
-            <input type="radio" name="prog-format" value="png" checked>
-            PNG
+            <input type="radio" name="prog-format" value="image" checked>
+            IMAGE
           </label>
           <label class="radio-label">
             <input type="radio" name="prog-format" value="bin">
@@ -469,6 +469,33 @@
           <label class="radio-label">
             <input type="radio" name="bas-load-mode" value="original">
             As defined
+          </label>
+        </div>
+      </div>
+
+      <!-- 画像減色モード選択（IMAGE + LOAD時のみ表示） -->
+      <div class="form-row" id="image-reduce-mode-row" style="display: none;">
+        <span class="form-label">Reduce:</span>
+        <div class="radio-group">
+          <label class="radio-label">
+            <input type="radio" name="image-reduce-mode" value="none" checked>
+            none
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="image-reduce-mode" value="reduce">
+            reduce
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="image-reduce-mode" value="dither">
+            dither
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="image-reduce-mode" value="edfs">
+            edfs
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="image-reduce-mode" value="retro">
+            retro
           </label>
         </div>
       </div>

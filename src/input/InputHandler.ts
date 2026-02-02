@@ -41,7 +41,10 @@ export type InputEventType =
 export type InputDeviceMode = 'keyboard' | 'mouse';
 
 /** ファイルフォーマット */
-export type FileFormat = 'png' | 'bin' | 'bin3' | 'bas';
+export type FileFormat = 'image' | 'bin' | 'bin3' | 'bas';
+
+/** 減色モード */
+export type ColorReduceMode = 'none' | 'reduce' | 'dither' | 'edfs' | 'retro';
 
 /** ROTATIONの種類 */
 export type RotationType =
@@ -67,7 +70,7 @@ export interface InputEvent {
     source?: 'rom' | 'ram';  // EDIT CHR.用（ROMCG/RAMCG）
     rotationType?: RotationType;  // ROTATION用
     transfer?: { start: number; end: number; target: number };  // TRANSFER用
-    file?: { format: FileFormat; start: number; end: number; basLoadMode?: 'start' | 'original' };  // ファイル保存/読み込み用
+    file?: { format: FileFormat; start: number; end: number; basLoadMode?: 'start' | 'original'; reduceMode?: ColorReduceMode };  // ファイル保存/読み込み用
     colorMap?: number[];  // COLOR CHANGE用（8要素の配列、各色の変換先）
     mousePos?: { dotX: number; dotY: number };  // マウス描画用（ドット座標）
   };
@@ -137,6 +140,8 @@ export class InputHandler {
   private progExecBtn: HTMLButtonElement | null = null;
   private progCancelBtn: HTMLButtonElement | null = null;
   private basLoadModeRow: HTMLElement | null = null;
+  private imageReduceModeRow: HTMLElement | null = null;
+  private imageReduceModeRadios: NodeListOf<HTMLInputElement> | null = null;
   private basLoadModeRadios: NodeListOf<HTMLInputElement> | null = null;
 
   constructor() {
@@ -240,6 +245,8 @@ export class InputHandler {
     this.progCancelBtn = document.getElementById('prog-cancel-btn') as HTMLButtonElement;
     this.basLoadModeRow = document.getElementById('bas-load-mode-row');
     this.basLoadModeRadios = document.querySelectorAll('input[name="bas-load-mode"]') as NodeListOf<HTMLInputElement>;
+    this.imageReduceModeRow = document.getElementById('image-reduce-mode-row');
+    this.imageReduceModeRadios = document.querySelectorAll('input[name="image-reduce-mode"]') as NodeListOf<HTMLInputElement>;
 
     // フォーマット変更時の処理
     this.progFormatRadios?.forEach(radio => {
@@ -404,9 +411,9 @@ export class InputHandler {
       this.progModeLoadLabel.classList.remove('disabled');
     }
 
-    // PNGの場合、範囲入力を非表示
+    // IMAGEの場合、範囲入力を非表示
     if (this.progRangeRow) {
-      if (selectedFormat === 'png') {
+      if (selectedFormat === 'image') {
         this.progRangeRow.classList.add('hidden');
       } else {
         this.progRangeRow.classList.remove('hidden');
@@ -431,13 +438,22 @@ export class InputHandler {
         this.basLoadModeRow.style.display = 'none';
       }
     }
+
+    // IMAGE + LOADの場合、減色モード選択を表示
+    if (this.imageReduceModeRow) {
+      if (selectedFormat === 'image' && selectedMode === 'load') {
+        this.imageReduceModeRow.style.display = 'flex';
+      } else {
+        this.imageReduceModeRow.style.display = 'none';
+      }
+    }
   }
 
   /**
    * 選択されているフォーマットを取得
    */
   private getSelectedFormat(): FileFormat {
-    let format: FileFormat = 'png';
+    let format: FileFormat = 'image';
     this.progFormatRadios?.forEach(radio => {
       if (radio.checked) format = radio.value as FileFormat;
     });
@@ -483,6 +499,12 @@ export class InputHandler {
       if (radio.checked) basLoadMode = radio.value as 'start' | 'original';
     });
 
+    // 画像減色モードを取得
+    let reduceMode: ColorReduceMode = 'none';
+    this.imageReduceModeRadios?.forEach(radio => {
+      if (radio.checked) reduceMode = radio.value as ColorReduceMode;
+    });
+
     this.hideAllPanels();
     this.mode = 'edit';
 
@@ -490,7 +512,7 @@ export class InputHandler {
     if (mode === 'save') {
       this.emit({ type: 'file-save', data: { file: { format, start, end } } });
     } else {
-      this.emit({ type: 'file-load', data: { file: { format, start, end, basLoadMode } } });
+      this.emit({ type: 'file-load', data: { file: { format, start, end, basLoadMode, reduceMode } } });
     }
   }
 
