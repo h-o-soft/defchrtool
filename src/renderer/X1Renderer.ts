@@ -317,6 +317,7 @@ export class X1Renderer {
 
   /**
    * 文字列を描画
+   * ASCII文字と半角カナ（U+FF61〜U+FF9F）に対応
    */
   drawText(
     x: number,
@@ -326,8 +327,11 @@ export class X1Renderer {
     bgColor: X1Color = X1_COLORS.BLACK
   ): void {
     for (let i = 0; i < text.length; i++) {
-      // ASCII文字のみ対応
-      const charCode = text.charCodeAt(i);
+      const unicode = text.charCodeAt(i);
+      // 半角カナ（U+FF61〜U+FF9F）をX1コード（0xA1〜0xDF）に変換
+      const charCode = (unicode >= 0xFF61 && unicode <= 0xFF9F)
+        ? unicode - 0xFF61 + 0xA1
+        : unicode;
       this.drawChar(x + i * FONT_WIDTH, y, charCode, fgColor, bgColor);
     }
   }

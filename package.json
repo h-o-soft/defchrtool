@@ -8,8 +8,8 @@
     "preview": "vite preview"
   },
   "keywords": ["x1", "retro", "pcg", "pixel-art"],
-  "author": "",
-  "license": "ISC",
+  "author": "H.O SOFT",
+  "license": "MIT",
   "description": "DEFCHR TOOL for Web - X1互換PCGエディタ",
   "devDependencies": {
     "typescript": "^5.9.3",

@@ -146,13 +146,22 @@ export class ScreenLayout {
   }
 
   /**
-   * メニューエリアを描画（5行）
+   * メニューエリアを描画（6行）
    * @param editMode 現在の編集モード
    * @param currentCharCode 現在のキャラクターコード（未使用、互換性のため残す）
    * @param editChrCode EDIT CHR.で入力した文字コード
    * @param lastDirection 最後のカーソル移動方向
+   * @param currentColor 現在の描画色
+   * @param inputDeviceMode 入力デバイスモード（keyboard/mouse）
    */
-  drawMenu(editMode: EditMode, _currentCharCode: number, editChrCode: number = 0, lastDirection: Direction = Direction.RIGHT): void {
+  drawMenu(
+    editMode: EditMode,
+    _currentCharCode: number,
+    editChrCode: number = 0,
+    lastDirection: Direction = Direction.RIGHT,
+    currentColor: X1Color = X1_COLORS.WHITE,
+    inputDeviceMode: 'keyboard' | 'mouse' = 'keyboard'
+  ): void {
     const baseY = LAYOUT.MENU_Y;
     const editChrCodeHex = editChrCode.toString(16).toUpperCase().padStart(2, '0');
 
@@ -171,8 +180,8 @@ export class ScreenLayout {
     // 5行目: P.....PROGRAMMING   :T....TRANSFER
     this.drawMenuLine5(baseY + 4);
 
-    // 6行目: G.....GRID
-    this.drawMenuLine6(baseY + 5);
+    // 6行目: G.....GRID          :K....INPUT=XX COL=N
+    this.drawMenuLine6(baseY + 5, currentColor, inputDeviceMode);
   }
 
   /**
@@ -199,7 +208,7 @@ export class ScreenLayout {
     this.x1Renderer.drawText(19 * CHAR_WIDTH, y, ':', X1_COLORS.WHITE);
 
     // 0-7 ポイントセット
-    this.x1Renderer.drawText(20 * CHAR_WIDTH, y, '0-7.POINT SET', X1_COLORS.WHITE);
+    this.x1Renderer.drawText(20 * CHAR_WIDTH, y, '0ｶﾗ7.POINT SET', X1_COLORS.WHITE);
   }
 
   /**
@@ -304,13 +313,29 @@ export class ScreenLayout {
   }
 
   /**
-   * メニュー6行目: GRID
+   * メニュー6行目: GRID, INPUT MODE, COLOR
    */
-  private drawMenuLine6(row: number): void {
+  private drawMenuLine6(row: number, currentColor: X1Color, inputDeviceMode: 'keyboard' | 'mouse'): void {
     const y = row * CHAR_HEIGHT;
 
     // G.....GRID 全体が緑
     this.x1Renderer.drawText(0 * CHAR_WIDTH, y, 'G.....GRID', X1_COLORS.GREEN);
+
+    // 空白
+    this.x1Renderer.drawText(10 * CHAR_WIDTH, y, '         ', X1_COLORS.BLACK);
+
+    // コロン区切り
+    this.x1Renderer.drawText(19 * CHAR_WIDTH, y, ':', X1_COLORS.WHITE);
+
+    // K....INPUT=XX
+    const modeStr = inputDeviceMode === 'keyboard' ? 'KB' : 'MS';
+    this.x1Renderer.drawText(20 * CHAR_WIDTH, y, 'K....', X1_COLORS.GREEN);
+    this.x1Renderer.drawText(25 * CHAR_WIDTH, y, modeStr, X1_COLORS.YELLOW);
+
+    // COL=N（Nは現在の色の数字、色付き表示）
+    this.x1Renderer.drawText(28 * CHAR_WIDTH, y, ' COL=', X1_COLORS.WHITE);
+    // 色番号を該当の色で表示
+    this.x1Renderer.drawText(33 * CHAR_WIDTH, y, currentColor.toString(), currentColor === X1_COLORS.BLACK ? X1_COLORS.WHITE : currentColor);
   }
 
   /**

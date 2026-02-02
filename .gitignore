@@ -2,3 +2,8 @@ node_modules/
 dist/
 .DS_Store
 *.log
+
+# AI instruction files
+docs/
+CLAUDE.md
+.claude/
