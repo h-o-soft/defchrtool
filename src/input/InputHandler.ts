@@ -33,6 +33,7 @@ export type InputEventType =
   | 'file-save'   // ファイル保存
   | 'file-load'   // ファイル読み込み
   | 'toggle-width' // WIDTH 40/80切り替え
+  | 'load-font'   // フォント読み込み（隠し機能）
   | 'home'
   | 'cancel';
 
@@ -981,6 +982,12 @@ export class InputHandler {
       case 'KeyW':
         event.preventDefault();
         this.emit({ type: 'toggle-width' });
+        break;
+
+      // Lキー: フォント読み込み（隠しキー）
+      case 'KeyL':
+        event.preventDefault();
+        this.emit({ type: 'load-font' });
         break;
 
       // Escapeキー: キャンセル

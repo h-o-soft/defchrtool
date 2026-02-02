@@ -22,7 +22,8 @@ import {
 const STORAGE_KEYS = {
   PCG_DATA: 'defchr-pcgdata',
   EDIT_BUFFER: 'defchr-editbuffer',
-  EDITOR_STATE: 'defchr-state'
+  EDITOR_STATE: 'defchr-state',
+  FONT_DATA: 'defchr-fontdata'
 } as const;
 
 class DEFCHRApp {
@@ -224,6 +225,10 @@ class DEFCHRApp {
         this.toggleWidthMode();
         break;
 
+      case 'load-font':
+        this.handleLoadFont();
+        break;
+
       case 'mouse-draw':
         this.handleMouseDraw(event.data!.mousePos!.dotX, event.data!.mousePos!.dotY);
         break;
@@ -402,6 +407,38 @@ class DEFCHRApp {
     const newMode = currentMode === 'WIDTH40' ? 'WIDTH80' : 'WIDTH40';
     this.canvasManager.setScreenMode(newMode);
     this.showStatusMessage(`${newMode}`);
+  }
+
+  /**
+   * フォント読み込み（Lキー - 隠しキー）
+   * FNT0808.X1形式（2048バイト）のフォントデータを読み込む
+   */
+  private handleLoadFont(): void {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.X1,.x1,.bin,.fnt';
+
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const data = new Uint8Array(arrayBuffer);
+
+        if (this.x1Renderer.setFontDataFromBinary(data)) {
+          this.showStatusMessage(`Font loaded: ${file.name}`);
+          this.scheduleSave();
+        } else {
+          this.showStatusMessage('Font load failed: invalid size');
+        }
+      } catch (e) {
+        console.error('[DEFCHRApp] Font load error:', e);
+        this.showStatusMessage('Font load error');
+      }
+    };
+
+    input.click();
   }
 
   /**
@@ -1329,6 +1366,13 @@ class DEFCHRApp {
       };
       localStorage.setItem(STORAGE_KEYS.EDITOR_STATE, JSON.stringify(stateToSave));
 
+      // フォントデータを保存（カスタムフォントが読み込まれている場合）
+      const fontData = this.x1Renderer.getAllFontData();
+      if (fontData) {
+        const fontDataBase64 = this.uint8ArrayToBase64(fontData);
+        localStorage.setItem(STORAGE_KEYS.FONT_DATA, fontDataBase64);
+      }
+
       console.log('[DEFCHRApp] Data saved to localStorage');
     } catch (e) {
       console.error('[DEFCHRApp] Failed to save to localStorage:', e);
@@ -1374,6 +1418,16 @@ class DEFCHRApp {
 
       // 選択中のキャラクターを反映
       this.definitionRenderer.setSelectedChar(this.editorState.currentCharCode);
+
+      // フォントデータを復元（存在する場合のみ）
+      const fontDataBase64 = localStorage.getItem(STORAGE_KEYS.FONT_DATA);
+      if (fontDataBase64) {
+        const fontDataArray = this.base64ToUint8Array(fontDataBase64);
+        if (fontDataArray.length === 2048) {
+          this.x1Renderer.setFontDataFromBinary(fontDataArray);
+          console.log('[DEFCHRApp] Custom font data restored');
+        }
+      }
 
       console.log('[DEFCHRApp] Data loaded from localStorage');
       return true;

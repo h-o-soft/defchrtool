@@ -275,6 +275,32 @@ export class X1Renderer {
   }
 
   /**
+   * 外部フォントデータで差し替え（FNT0808.X1形式）
+   * @param data 2048バイトのフォントデータ（256文字 × 8バイト）
+   * @returns 成功したかどうか
+   */
+  setFontDataFromBinary(data: Uint8Array): boolean {
+    if (data.length !== 2048) {
+      console.error(`[X1Renderer] Invalid font data size: ${data.length} (expected 2048)`);
+      return false;
+    }
+
+    // フォントデータを差し替え
+    this.fontData = new Uint8Array(data);
+    this.fontLoaded = true;
+    console.log('[X1Renderer] Font data replaced from binary');
+    return true;
+  }
+
+  /**
+   * フォントデータ全体を取得（保存用）
+   * @returns 2048バイトのフォントデータ、またはnull
+   */
+  getAllFontData(): Uint8Array | null {
+    return this.fontData ? new Uint8Array(this.fontData) : null;
+  }
+
+  /**
    * 1文字を描画
    */
   drawChar(
