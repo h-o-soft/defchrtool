@@ -5,6 +5,7 @@
 
 import { PCGData } from '../core/PCGData';
 import { CanvasManager } from './CanvasManager';
+import { X1Renderer } from './X1Renderer';
 import {
   FONT_WIDTH,
   FONT_HEIGHT,
@@ -20,21 +21,10 @@ const DOT_SIZE = 8;
 /** グリッド線の色 */
 const GRID_COLOR = 'rgba(128, 128, 128, 0.5)';
 
-/** ●文字パターン (0xE0) - 8x8ドット */
-const CIRCLE_PATTERN = [
-  0b00111100,
-  0b01111110,
-  0b11111111,
-  0b11111111,
-  0b11111111,
-  0b11111111,
-  0b01111110,
-  0b00111100
-];
-
 export class EditorRenderer {
   private canvasManager: CanvasManager;
   private pcgData: PCGData;
+  private x1Renderer: X1Renderer;
 
   /** 編集エリアの描画開始位置 */
   private offsetX: number = 8;
@@ -47,9 +37,10 @@ export class EditorRenderer {
   private cursorVisible: boolean = true;
   private cursorBlinkInterval: number | null = null;
 
-  constructor(canvasManager: CanvasManager, pcgData: PCGData) {
+  constructor(canvasManager: CanvasManager, pcgData: PCGData, x1Renderer: X1Renderer) {
     this.canvasManager = canvasManager;
     this.pcgData = pcgData;
+    this.x1Renderer = x1Renderer;
 
     // カーソル点滅開始
     this.startCursorBlink();
@@ -154,9 +145,10 @@ export class EditorRenderer {
   ): void {
     const [r, g, b] = X1_COLOR_RGB[color as keyof typeof X1_COLOR_RGB];
 
-    // DOT_SIZE = 8 なので、CIRCLE_PATTERNの8x8パターンをそのまま使用
+    // ROMフォントの0xE0（●）を使用
+    const circlePattern = this.x1Renderer.getFontData(0xE0);
     for (let py = 0; py < 8; py++) {
-      const rowBits = CIRCLE_PATTERN[py];
+      const rowBits = circlePattern[py];
       for (let px = 0; px < 8; px++) {
         const isSet = (rowBits & (0x80 >> px)) !== 0;
         if (isSet) {

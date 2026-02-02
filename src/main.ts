@@ -59,7 +59,7 @@ class DEFCHRApp {
     this.screenLayout = new ScreenLayout(this.x1Renderer);
     this.pcgData = new PCGData();
     this.editBuffer = new PCGData();  // 編集エリア専用バッファ
-    this.editorRenderer = new EditorRenderer(this.canvasManager, this.editBuffer);  // 編集バッファを使用
+    this.editorRenderer = new EditorRenderer(this.canvasManager, this.editBuffer, this.x1Renderer);  // 編集バッファを使用
     this.definitionRenderer = new DefinitionRenderer(this.canvasManager, this.pcgData);
     this.inputHandler = new InputHandler();
 
