@@ -15,7 +15,7 @@ export class CanvasManager {
   private backCtx: CanvasRenderingContext2D;
 
   /** 現在の画面モード */
-  private screenMode: ScreenMode = 'WIDTH80';
+  private screenMode: ScreenMode = 'WIDTH40';
 
   /** 表示スケール */
   private scale: number = 2;
@@ -71,8 +71,8 @@ export class CanvasManager {
    * キャンバスサイズを調整
    */
   private resize(): void {
-    // WIDTH40モードは320x200、WIDTH80モードは640x200
-    const effectiveWidth = this.screenMode === 'WIDTH40' ? X1_WIDTH / 2 : X1_WIDTH;
+    // WIDTH40は正方形ドット、WIDTH80は横半分（縦長ドット）
+    const effectiveWidth = this.screenMode === 'WIDTH80' ? X1_WIDTH / 2 : X1_WIDTH;
 
     this.frontCanvas.width = effectiveWidth * this.scale;
     this.frontCanvas.height = X1_HEIGHT * this.scale;
@@ -100,20 +100,13 @@ export class CanvasManager {
    * バックバッファをフロントバッファに転送
    */
   flip(): void {
-    // WIDTH40モードは横を2倍に引き伸ばす
-    if (this.screenMode === 'WIDTH40') {
-      this.frontCtx.drawImage(
-        this.backCanvas,
-        0, 0, X1_WIDTH / 2, X1_HEIGHT,
-        0, 0, this.frontCanvas.width, this.frontCanvas.height
-      );
-    } else {
-      this.frontCtx.drawImage(
-        this.backCanvas,
-        0, 0, X1_WIDTH, X1_HEIGHT,
-        0, 0, this.frontCanvas.width, this.frontCanvas.height
-      );
-    }
+    // 描画領域は変わらず、表示幅だけ変わる
+    // WIDTH80では横半分に縮んで縦長ドットになる
+    this.frontCtx.drawImage(
+      this.backCanvas,
+      0, 0, X1_WIDTH, X1_HEIGHT,
+      0, 0, this.frontCanvas.width, this.frontCanvas.height
+    );
   }
 
   /**

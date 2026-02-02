@@ -220,6 +220,10 @@ class DEFCHRApp {
         this.toggleInputDeviceMode();
         break;
 
+      case 'toggle-width':
+        this.toggleWidthMode();
+        break;
+
       case 'mouse-draw':
         this.handleMouseDraw(event.data!.mousePos!.dotX, event.data!.mousePos!.dotY);
         break;
@@ -388,6 +392,16 @@ class DEFCHRApp {
   private toggleInputDeviceMode(): void {
     this.inputDeviceMode = this.inputHandler.getInputDeviceMode();
     this.showStatusMessage(`Input: ${this.inputDeviceMode === 'keyboard' ? 'Keyboard' : 'Mouse'}`);
+  }
+
+  /**
+   * WIDTH 40/80モード切り替え（Wキー - 隠しキー）
+   */
+  private toggleWidthMode(): void {
+    const currentMode = this.canvasManager.getScreenMode();
+    const newMode = currentMode === 'WIDTH40' ? 'WIDTH80' : 'WIDTH40';
+    this.canvasManager.setScreenMode(newMode);
+    this.showStatusMessage(`${newMode}`);
   }
 
   /**

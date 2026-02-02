@@ -32,6 +32,7 @@ export type InputEventType =
   | 'mouse-draw'  // マウスで描画
   | 'file-save'   // ファイル保存
   | 'file-load'   // ファイル読み込み
+  | 'toggle-width' // WIDTH 40/80切り替え
   | 'home'
   | 'cancel';
 
@@ -974,6 +975,12 @@ export class InputHandler {
       case 'KeyK':
         event.preventDefault();
         this.toggleInputDeviceMode();
+        break;
+
+      // Wキー: WIDTH 40/80切り替え（隠しキー）
+      case 'KeyW':
+        event.preventDefault();
+        this.emit({ type: 'toggle-width' });
         break;
 
       // Escapeキー: キャンセル
