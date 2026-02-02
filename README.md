@@ -188,8 +188,17 @@ npm run build
 
 ## クレジット
 
-- X1互換フォント: [meister68k/X1_compatible_font](https://github.com/meister68k/X1_compatible_font)
 - オリジナル「DEFCHR TOOL」: SHARP X1システムディスク収録
+
+### 使用フォント
+
+本ツールでは以下のフォントを使用しています：
+
+- **X1互換フォント**: [meister68k/X1_compatible_font](https://github.com/meister68k/X1_compatible_font) by Meister氏
+- **美咲フォント**: [littlelimit.net](https://littlelimit.net/misaki.htm) by 門真なむ氏
+
+X1互換フォントは美咲フォントを元に作成されており、美咲フォントライセンスに従っています。
+詳細は[美咲フォントライセンス](https://littlelimit.net/font.htm#license)をご確認ください。
 
 ## ライセンス
 

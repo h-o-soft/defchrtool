@@ -90,7 +90,7 @@ class DEFCHRApp {
     console.log('[DEFCHRApp] Initializing...');
 
     // X1フォントを読み込み
-    await this.x1Renderer.loadFont('/assets/fonts/X1font.png');
+    await this.x1Renderer.loadFont(`${import.meta.env.BASE_URL}assets/fonts/X1font.png`);
 
     // 注意: PCGデータ変更時のリアルタイム反映は無効化
     // 定義エリアへの反映は SET CHR. 実行時のみ行う（handleSetChr内）
