@@ -57,6 +57,9 @@ export type RotationType =
   | 'flipH'    // 6: 上下フリップ
   | 'flipV';   // 7: 左右フリップ
 
+/** BAS保存形式 */
+export type BasSaveFormat = 'asc' | 'bin';
+
 /** 入力イベントデータ */
 export interface InputEvent {
   type: InputEventType;
@@ -70,7 +73,7 @@ export interface InputEvent {
     source?: 'rom' | 'ram';  // EDIT CHR.用（ROMCG/RAMCG）
     rotationType?: RotationType;  // ROTATION用
     transfer?: { start: number; end: number; target: number };  // TRANSFER用
-    file?: { format: FileFormat; start: number; end: number; basLoadMode?: 'start' | 'original'; reduceMode?: ColorReduceMode };  // ファイル保存/読み込み用
+    file?: { format: FileFormat; start: number; end: number; basLoadMode?: 'start' | 'original'; reduceMode?: ColorReduceMode; basFormat?: BasSaveFormat };  // ファイル保存/読み込み用
     colorMap?: number[];  // COLOR CHANGE用（8要素の配列、各色の変換先）
     mousePos?: { dotX: number; dotY: number };  // マウス描画用（ドット座標）
   };
@@ -140,6 +143,8 @@ export class InputHandler {
   private progExecBtn: HTMLButtonElement | null = null;
   private progCancelBtn: HTMLButtonElement | null = null;
   private basLoadModeRow: HTMLElement | null = null;
+  private basSaveFormatRow: HTMLElement | null = null;
+  private basSaveFormatRadios: NodeListOf<HTMLInputElement> | null = null;
   private imageReduceModeRow: HTMLElement | null = null;
   private imageReduceModeRadios: NodeListOf<HTMLInputElement> | null = null;
   private basLoadModeRadios: NodeListOf<HTMLInputElement> | null = null;
@@ -245,6 +250,8 @@ export class InputHandler {
     this.progCancelBtn = document.getElementById('prog-cancel-btn') as HTMLButtonElement;
     this.basLoadModeRow = document.getElementById('bas-load-mode-row');
     this.basLoadModeRadios = document.querySelectorAll('input[name="bas-load-mode"]') as NodeListOf<HTMLInputElement>;
+    this.basSaveFormatRow = document.getElementById('bas-save-format-row');
+    this.basSaveFormatRadios = document.querySelectorAll('input[name="bas-save-format"]') as NodeListOf<HTMLInputElement>;
     this.imageReduceModeRow = document.getElementById('image-reduce-mode-row');
     this.imageReduceModeRadios = document.querySelectorAll('input[name="image-reduce-mode"]') as NodeListOf<HTMLInputElement>;
 
@@ -430,6 +437,15 @@ export class InputHandler {
       }
     }
 
+    // BAS + SAVEの場合、BAS保存形式選択を表示
+    if (this.basSaveFormatRow) {
+      if (selectedFormat === 'bas' && selectedMode === 'save') {
+        this.basSaveFormatRow.style.display = 'flex';
+      } else {
+        this.basSaveFormatRow.style.display = 'none';
+      }
+    }
+
     // BAS + LOADの場合、BASロードモード選択を表示
     if (this.basLoadModeRow) {
       if (selectedFormat === 'bas' && selectedMode === 'load') {
@@ -499,6 +515,12 @@ export class InputHandler {
       if (radio.checked) basLoadMode = radio.value as 'start' | 'original';
     });
 
+    // BAS保存形式を取得
+    let basFormat: BasSaveFormat = 'asc';
+    this.basSaveFormatRadios?.forEach(radio => {
+      if (radio.checked) basFormat = radio.value as BasSaveFormat;
+    });
+
     // 画像減色モードを取得
     let reduceMode: ColorReduceMode = 'none';
     this.imageReduceModeRadios?.forEach(radio => {
@@ -510,7 +532,7 @@ export class InputHandler {
 
     // イベント発火
     if (mode === 'save') {
-      this.emit({ type: 'file-save', data: { file: { format, start, end } } });
+      this.emit({ type: 'file-save', data: { file: { format, start, end, basFormat } } });
     } else {
       this.emit({ type: 'file-load', data: { file: { format, start, end, basLoadMode, reduceMode } } });
     }

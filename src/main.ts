@@ -9,7 +9,7 @@ import { EditorRenderer } from './renderer/EditorRenderer';
 import { DefinitionRenderer } from './renderer/DefinitionRenderer';
 import { ScreenLayout } from './renderer/ScreenLayout';
 import { PCGData } from './core/PCGData';
-import { InputHandler, InputEvent, RotationType, FileFormat, InputDeviceMode, ColorReduceMode } from './input/InputHandler';
+import { InputHandler, InputEvent, RotationType, FileFormat, InputDeviceMode, ColorReduceMode, BasSaveFormat } from './input/InputHandler';
 import { reduceColors, isExactX1Colors } from './core/ColorReducer';
 import {
   X1_COLORS,
@@ -263,7 +263,7 @@ class DEFCHRApp {
         break;
 
       case 'file-save':
-        this.handleFileSave(event.data!.file!.format, event.data!.file!.start, event.data!.file!.end);
+        this.handleFileSave(event.data!.file!.format, event.data!.file!.start, event.data!.file!.end, event.data!.file!.basFormat);
         break;
 
       case 'file-load':
@@ -890,7 +890,7 @@ class DEFCHRApp {
   /**
    * ファイル保存処理
    */
-  private handleFileSave(format: FileFormat, start: number, end: number): void {
+  private handleFileSave(format: FileFormat, start: number, end: number, basFormat?: BasSaveFormat): void {
     switch (format) {
       case 'image':
         this.savePng();
@@ -902,7 +902,11 @@ class DEFCHRApp {
         this.saveBin(start, end, true);
         break;
       case 'bas':
-        this.saveBas(start, end);
+        if (basFormat === 'bin') {
+          this.saveBasBinary(start, end);
+        } else {
+          this.saveBasAscii(start, end);
+        }
         break;
     }
   }
@@ -1168,7 +1172,7 @@ class DEFCHRApp {
    * @param start 開始文字コード
    * @param end 終了文字コード
    */
-  private saveBas(start: number, end: number): void {
+  private saveBasAscii(start: number, end: number): void {
     const count = end - start + 1;
     if (count <= 0) {
       this.showStatusMessage('Invalid range');
@@ -1191,12 +1195,139 @@ class DEFCHRApp {
 
       // DEFCHR$(code)=HEXCHR$("...")
       const lineNum = lineStart + i * 10;
-      lines.push(`${lineNum} DEFCHR$(${charCode})=HEXCHR$("${hexStr}")`);
+      lines.push(`${lineNum}DEFCHR$(${charCode})=HEXCHR$("${hexStr}")`);
     }
 
-    // BASファイルとしてダウンロード
-    const content = lines.join('\r\n') + '\r\n';
+    // ASCファイルとしてダウンロード（X1 BASICはCRのみ）
+    const content = lines.join('\r') + '\r';
     const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'pcg.asc';
+    a.click();
+    URL.revokeObjectURL(url);
+    this.showStatusMessage('Saved: pcg.asc');
+  }
+
+  /**
+   * BAS形式で保存（X1 BASIC バイナリ形式）
+   * @param start 開始文字コード
+   * @param end 終了文字コード
+   */
+  private saveBasBinary(start: number, end: number): void {
+    const count = end - start + 1;
+    if (count <= 0) {
+      this.showStatusMessage('Invalid range');
+      return;
+    }
+
+    // X1 BASICトークン定義
+    const TOKEN_DEFCHR = 0xB2;
+    const TOKEN_DOLLAR = 0xFF;      // $ (文字列関数拡張プレフィックス)
+    const TOKEN_FUNC_CALL = 0xA0;   // 関数呼び出し (DEFCHR$の後)
+    const TOKEN_LPAREN = 0x28;      // (
+    const TOKEN_RPAREN = 0x29;      // )
+    const TOKEN_EQUAL = 0xF4;       // =
+    const TOKEN_HEXCHR = 0xBF;      // HEXCHR (0xFFの後)
+    const TOKEN_QUOTE = 0x22;       // "
+    const TOKEN_INT16 = 0x12;       // 16ビット整数プレフィックス
+    const TOKEN_LINE_END = 0x00;    // 行終端
+    const PROGRAM_END = [0x00, 0x00]; // プログラム終端
+
+    // 1行のデータを生成する関数
+    const generateLine = (lineNum: number, charCode: number, hexStr: string): number[] => {
+      const lineData: number[] = [];
+
+      // 行番号 (リトルエンディアン 2バイト)
+      lineData.push(lineNum & 0xFF);
+      lineData.push((lineNum >> 8) & 0xFF);
+
+      // DEFCHR$ トークン: b2 ff a0
+      lineData.push(TOKEN_DEFCHR);
+      lineData.push(TOKEN_DOLLAR);
+      lineData.push(TOKEN_FUNC_CALL);
+
+      // (
+      lineData.push(TOKEN_LPAREN);
+
+      // 文字コード (16ビット整数): 12 xx xx
+      lineData.push(TOKEN_INT16);
+      lineData.push(charCode & 0xFF);
+      lineData.push((charCode >> 8) & 0xFF);
+
+      // )
+      lineData.push(TOKEN_RPAREN);
+
+      // =
+      lineData.push(TOKEN_EQUAL);
+
+      // HEXCHR$: ff bf
+      lineData.push(TOKEN_DOLLAR);
+      lineData.push(TOKEN_HEXCHR);
+
+      // (
+      lineData.push(TOKEN_LPAREN);
+
+      // "文字列"
+      lineData.push(TOKEN_QUOTE);
+      for (let i = 0; i < hexStr.length; i++) {
+        lineData.push(hexStr.charCodeAt(i));
+      }
+      lineData.push(TOKEN_QUOTE);
+
+      // )
+      lineData.push(TOKEN_RPAREN);
+
+      // 行終端
+      lineData.push(TOKEN_LINE_END);
+
+      return lineData;
+    };
+
+    // 全行のデータを生成
+    const allLines: number[][] = [];
+    const lineStart = 60960;
+
+    for (let i = 0; i < count; i++) {
+      const charCode = start + i;
+      const charData = this.pcgData.getCharacter(charCode);
+
+      // B[8], R[8], G[8] を16進文字列に変換
+      let hexStr = '';
+      for (let j = 0; j < 24; j++) {
+        hexStr += charData[j].toString(16).toUpperCase().padStart(2, '0');
+      }
+
+      const lineNum = lineStart + i * 10;
+      allLines.push(generateLine(lineNum, charCode, hexStr));
+    }
+
+    // リンクポインタを計算して最終データを生成
+    // リンクポインタは行サイズ（次の行までの距離）を示す
+    // X1 BASICはロード時にメモリアドレスとして再計算する
+    const finalData: number[] = [];
+
+    for (let i = 0; i < allLines.length; i++) {
+      const lineData = allLines[i];
+      // この行のサイズ = リンクポインタ(2) + 行データ
+      const lineSize = 2 + lineData.length;
+
+      // リンクポインタを追加（リトルエンディアン）
+      // リンクポインタは行サイズ（次の行までの距離）
+      finalData.push(lineSize & 0xFF);
+      finalData.push((lineSize >> 8) & 0xFF);
+
+      // 行データを追加
+      finalData.push(...lineData);
+    }
+
+    // プログラム終端を追加
+    finalData.push(...PROGRAM_END);
+
+    // BASファイルとしてダウンロード
+    const data = new Uint8Array(finalData);
+    const blob = new Blob([data.buffer as ArrayBuffer], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -1207,65 +1338,33 @@ class DEFCHRApp {
   }
 
   /**
-   * BAS形式で読み込み
+   * BAS形式で読み込み（ASCII/バイナリ両対応）
    * @param start 開始文字コード（'start'モード時のみ使用）
    * @param mode 'start': STARTから連続読み込み, 'original': ファイル内のコードをそのまま使用
    */
   private loadBas(start: number, mode: 'start' | 'original'): void {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.bas,.txt';
+    input.accept = '.bas,.asc,.txt,text/plain';
 
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
 
-      const text = await file.text();
-      const lines = text.split(/\r?\n/);
+      const buffer = await file.arrayBuffer();
+      const data = new Uint8Array(buffer);
 
-      // DEFCHR$パターン: 行番号 DEFCHR$(コード)=HEXCHR$("16進文字列")
-      // コードは10進数
-      const defchrPattern = /DEFCHR\$\s*\(\s*(\d+)\s*\)\s*=\s*HEXCHR\$\s*\(\s*"([0-9A-Fa-f]+)"\s*\)/i;
+      // バイナリ形式かASCII形式かを判定
+      // バイナリ形式は行終端に0x00を含む
+      const isBinary = data.includes(0x00);
 
       let loadCount = 0;
-      let currentCode = start;
 
-      for (const line of lines) {
-        const match = line.match(defchrPattern);
-        if (!match) continue;
-
-        const originalCode = parseInt(match[1], 10);
-        const hexStr = match[2];
-
-        // 48文字（24バイト x 2）でない場合はスキップ
-        if (hexStr.length !== 48) {
-          console.warn(`Invalid hex length for code ${originalCode}: ${hexStr.length}`);
-          continue;
-        }
-
-        // 16進文字列をバイト配列に変換
-        const charData = new Uint8Array(24);
-        for (let i = 0; i < 24; i++) {
-          charData[i] = parseInt(hexStr.substr(i * 2, 2), 16);
-        }
-
-        // 書き込み先コードを決定
-        const targetCode = mode === 'original' ? originalCode : currentCode;
-
-        // 範囲チェック
-        if (targetCode < 0 || targetCode > 255) {
-          console.warn(`Code out of range: ${targetCode}`);
-          if (mode === 'start') currentCode++;
-          continue;
-        }
-
-        this.pcgData.setCharacter(targetCode, charData);
-        loadCount++;
-
-        if (mode === 'start') {
-          currentCode++;
-          if (currentCode > 255) break;
-        }
+      if (isBinary) {
+        loadCount = this.loadBasBinary(data, start, mode);
+      } else {
+        const text = new TextDecoder().decode(data);
+        loadCount = this.loadBasAsciiText(text, start, mode);
       }
 
       // 定義エリアを更新
@@ -1275,6 +1374,204 @@ class DEFCHRApp {
     };
 
     input.click();
+  }
+
+  /**
+   * BAS ASCII形式のテキストを読み込み
+   */
+  private loadBasAsciiText(text: string, start: number, mode: 'start' | 'original'): number {
+    // すべての改行コードに対応（CR, LF, CRLF）
+    const lines = text.split(/\r\n|\r|\n/);
+
+    // DEFCHR$パターン: 行番号 DEFCHR$(コード)=HEXCHR$("16進文字列")
+    const defchrPattern = /DEFCHR\$\s*\(\s*(\d+)\s*\)\s*=\s*HEXCHR\$\s*\(\s*"([0-9A-Fa-f]+)"\s*\)/i;
+
+    let loadCount = 0;
+    let currentCode = start;
+
+    for (const line of lines) {
+      const match = line.match(defchrPattern);
+      if (!match) continue;
+
+      const originalCode = parseInt(match[1], 10);
+      const hexStr = match[2];
+
+      // 48文字（24バイト x 2）でない場合はスキップ
+      if (hexStr.length !== 48) {
+        console.warn(`Invalid hex length for code ${originalCode}: ${hexStr.length}`);
+        continue;
+      }
+
+      // 16進文字列をバイト配列に変換
+      const charData = new Uint8Array(24);
+      for (let i = 0; i < 24; i++) {
+        charData[i] = parseInt(hexStr.substr(i * 2, 2), 16);
+      }
+
+      // 書き込み先コードを決定
+      const targetCode = mode === 'original' ? originalCode : currentCode;
+
+      // 範囲チェック
+      if (targetCode < 0 || targetCode > 255) {
+        console.warn(`Code out of range: ${targetCode}`);
+        if (mode === 'start') currentCode++;
+        continue;
+      }
+
+      this.pcgData.setCharacter(targetCode, charData);
+      loadCount++;
+
+      if (mode === 'start') {
+        currentCode++;
+        if (currentCode > 255) break;
+      }
+    }
+
+    return loadCount;
+  }
+
+  /**
+   * BAS バイナリ形式を読み込み
+   * DEFCHR$行のみを処理し、他の命令は無視する
+   */
+  private loadBasBinary(data: Uint8Array, start: number, mode: 'start' | 'original'): number {
+    // X1 BASICトークン
+    const TOKEN_DEFCHR = 0xB2;
+    const TOKEN_DOLLAR = 0xFF;
+    const TOKEN_FUNC_CALL = 0xA0;
+
+    let loadCount = 0;
+    let currentCode = start;
+    let offset = 0;
+
+    // プログラム終端（0x00 0x00）まで処理
+    while (offset < data.length - 1) {
+      // リンクポインタを読む（終端チェック）
+      const linkLow = data[offset];
+      const linkHigh = data[offset + 1];
+      const linkPointer = linkLow | (linkHigh << 8);
+
+      // プログラム終端
+      if (linkPointer === 0x0000) {
+        break;
+      }
+
+      // 行の開始位置を保存
+      const lineStart = offset;
+
+      // 行番号をスキップ（リンクポインタ2B + 行番号2B = 4B）
+      offset += 4;
+
+      // 行終端はリンクポインタを使って計算（行終端の0x00を含む）
+      // リンクポインタは行サイズなので、lineStart + linkPointer - 1 が行終端0x00の位置
+      const lineEnd = lineStart + linkPointer - 1;
+
+      // DEFCHR$行かチェック（b2 ff a0 で始まる）
+      if (offset + 3 <= lineEnd &&
+          data[offset] === TOKEN_DEFCHR &&
+          data[offset + 1] === TOKEN_DOLLAR &&
+          data[offset + 2] === TOKEN_FUNC_CALL) {
+
+        // DEFCHR$行をパース
+        const result = this.parseDefchrBinaryLine(data, offset, lineEnd);
+
+        if (result) {
+          const { charCode: originalCode, hexStr } = result;
+
+          // 書き込み先コードを決定
+          const targetCode = mode === 'original' ? originalCode : currentCode;
+
+          // 範囲チェック
+          if (targetCode >= 0 && targetCode <= 255) {
+            // 16進文字列をバイト配列に変換
+            const charData = new Uint8Array(24);
+            for (let i = 0; i < 24; i++) {
+              charData[i] = parseInt(hexStr.substr(i * 2, 2), 16);
+            }
+
+            this.pcgData.setCharacter(targetCode, charData);
+            loadCount++;
+
+            if (mode === 'start') {
+              currentCode++;
+              if (currentCode > 255) break;
+            }
+          }
+        }
+      }
+
+      // 次の行へ（リンクポインタを使用）
+      offset = lineStart + linkPointer;
+    }
+
+    return loadCount;
+  }
+
+  /**
+   * DEFCHR$バイナリ行をパース
+   * @returns { charCode, hexStr } または null
+   */
+  private parseDefchrBinaryLine(data: Uint8Array, offset: number, lineEnd: number): { charCode: number; hexStr: string } | null {
+    const TOKEN_INT16 = 0x12;
+    const TOKEN_QUOTE = 0x22;
+
+    // b2 ff a0 をスキップ（DEFCHR$）
+    offset += 3;
+
+    // ( (0x28) をスキップ
+    if (offset >= lineEnd || data[offset] !== 0x28) return null;
+    offset++;
+
+    // 文字コードを読む
+    let charCode: number;
+    if (data[offset] === TOKEN_INT16) {
+      // 16ビット整数: 12 xx xx
+      if (offset + 3 > lineEnd) return null;
+      charCode = data[offset + 1] | (data[offset + 2] << 8);
+      offset += 3;
+    } else if (data[offset] >= 0x02 && data[offset] <= 0x0A) {
+      // 小さい整数: 1-9 は値+1で格納
+      charCode = data[offset] - 1;
+      offset++;
+    } else {
+      return null;
+    }
+
+    // ) (0x29) をスキップ
+    if (offset >= lineEnd || data[offset] !== 0x29) return null;
+    offset++;
+
+    // = (0xF4) をスキップ
+    if (offset >= lineEnd || data[offset] !== 0xF4) return null;
+    offset++;
+
+    // HEXCHR$ (ff bf) をスキップ
+    if (offset + 2 > lineEnd || data[offset] !== 0xFF || data[offset + 1] !== 0xBF) return null;
+    offset += 2;
+
+    // ( (0x28) をスキップ
+    if (offset >= lineEnd || data[offset] !== 0x28) return null;
+    offset++;
+
+    // " (0x22) をスキップ
+    if (offset >= lineEnd || data[offset] !== TOKEN_QUOTE) return null;
+    offset++;
+
+    // 48文字のHEX文字列を読む
+    if (offset + 48 > lineEnd) return null;
+    let hexStr = '';
+    for (let i = 0; i < 48; i++) {
+      hexStr += String.fromCharCode(data[offset + i]);
+    }
+    offset += 48;
+
+    // " (0x22) を確認
+    if (offset >= lineEnd || data[offset] !== TOKEN_QUOTE) return null;
+
+    // HEX文字列の検証
+    if (!/^[0-9A-Fa-f]{48}$/.test(hexStr)) return null;
+
+    return { charCode, hexStr };
   }
 
   /**
