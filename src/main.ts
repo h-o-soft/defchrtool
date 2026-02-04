@@ -1,6 +1,6 @@
 /**
  * X1 DEFCHR TOOL for Web - メインエントリポイント
- * Phase 4: 入力・操作の拡張
+ * Phase 6: DEFCHRApp責務分離
  */
 
 import { CanvasManager } from './renderer/CanvasManager';
@@ -9,19 +9,12 @@ import { EditorRenderer } from './renderer/EditorRenderer';
 import { DefinitionRenderer } from './renderer/DefinitionRenderer';
 import { ScreenLayout } from './renderer/ScreenLayout';
 import { PCGData } from './core/PCGData';
-import { InputHandler, InputEvent, RotationType, InputDeviceMode, ColorReduceMode, BasSaveFormat, FileFormat } from './input/InputHandler';
-import {
-  X1_COLORS,
-  EditMode,
-  Direction,
-  EditorState,
-  X1Color
-} from './core/types';
+import { InputHandler, InputEvent, ColorReduceMode, BasSaveFormat, FileFormat } from './input/InputHandler';
+import { X1_COLORS, EditMode, X1Color } from './core/types';
 import { STATUS_MESSAGE_DURATION } from './core/constants';
 import { BinFormat, BasFormat, ImageFormat } from './io';
 import { LocalStorageService } from './storage';
-import { EditBufferTransform } from './core/EditBufferTransform';
-import { getEditArea, getCursorCharPos } from './core/EditAreaCalculator';
+import { EditorState, EditorCommands, CommandResult } from './app';
 
 class DEFCHRApp {
   private canvasManager: CanvasManager;
@@ -36,6 +29,9 @@ class DEFCHRApp {
 
   /** エディタの状態 */
   private editorState: EditorState;
+
+  /** エディタコマンド */
+  private editorCommands: EditorCommands;
 
   /** アニメーションフレームID */
   private animationFrameId: number | null = null;
@@ -59,16 +55,15 @@ class DEFCHRApp {
     this.inputHandler = new InputHandler();
     this.storageService = new LocalStorageService();
 
-    // 初期状態（EDIT MODEはデフォルトでALL）
-    this.editorState = {
-      editMode: EditMode.ALL,
-      cursorPosition: { x: 0, y: 0 },
-      currentColor: X1_COLORS.WHITE,
-      lastDirection: Direction.RIGHT,
-      currentCharCode: 0,
-      mouseMode: false,
-      editChrCode: 0
-    };
+    // 初期状態
+    this.editorState = new EditorState();
+
+    // コマンド実行オブジェクト
+    this.editorCommands = new EditorCommands({
+      pcgData: this.pcgData,
+      editBuffer: this.editBuffer,
+      editorState: this.editorState
+    });
 
     // レイアウト設定（ScreenLayoutの座標に合わせる）
     // 編集エリア: 枠の内側（1文字分内側）
@@ -89,15 +84,6 @@ class DEFCHRApp {
     // X1フォントを読み込み
     await this.x1Renderer.loadFont(`${import.meta.env.BASE_URL}assets/fonts/X1font.png`);
 
-    // 注意: PCGデータ変更時のリアルタイム反映は無効化
-    // 定義エリアへの反映は SET CHR. 実行時のみ行う（handleSetChr内）
-    // this.pcgData.on('pcg-updated', (data) => {
-    //   const { code } = data as { code: number };
-    //   if (code >= 0) {
-    //     this.definitionRenderer.renderCharacter(code);
-    //   }
-    // });
-
     // 入力イベントハンドラを設定
     this.inputHandler.onInput((event) => this.handleInput(event));
 
@@ -113,7 +99,7 @@ class DEFCHRApp {
     if (!loaded) {
       this.initSamplePCGData();
       // デフォルトのグリッド状態を反映
-      this.editorRenderer.setShowGrid(this.gridVisible);
+      this.editorRenderer.setShowGrid(this.editorState.gridVisible);
     }
 
     console.log('[DEFCHRApp] Initialized successfully');
@@ -182,39 +168,42 @@ class DEFCHRApp {
   private handleInput(event: InputEvent): void {
     switch (event.type) {
       case 'cursor-move':
-        this.handleCursorMove(event.data.direction, event.data.fast);
+        this.editorState.moveCursor(event.data.direction, event.data.fast);
+        this.scheduleSave();
         break;
 
       case 'draw-dot':
-        this.handleDrawDot(event.data.color);
+        this.handleCommandResult(this.editorCommands.drawDot(event.data.color));
         break;
 
       case 'toggle-draw':
-        this.handleToggleDraw();
+        this.handleCommandResult(this.editorCommands.toggleDraw());
         break;
 
       case 'home':
-        this.handleHome();
+        this.editorState.cursorHome();
+        this.showStatusMessage('Cursor: HOME');
         break;
 
       case 'mode-change':
-        this.cycleEditMode();
+        this.handleModeChange();
         break;
 
       case 'direction-change':
-        this.cycleDirection();
+        this.handleDirectionChange();
         break;
 
       case 'toggle-grid':
-        this.toggleGrid();
+        this.handleToggleGrid();
         break;
 
       case 'color-select':
-        this.handleColorSelect(event.data.color);
+        this.editorState.setColor(event.data.color);
+        this.showStatusMessage(`Color: ${event.data.color}`);
         break;
 
       case 'toggle-input-mode':
-        this.toggleInputDeviceMode();
+        this.showStatusMessage(`Input: ${this.inputHandler.getInputDeviceMode() === 'keyboard' ? 'Keyboard' : 'Mouse'}`);
         break;
 
       case 'toggle-width':
@@ -226,35 +215,58 @@ class DEFCHRApp {
         break;
 
       case 'mouse-draw':
-        this.handleMouseDraw(event.data.mousePos.dotX, event.data.mousePos.dotY);
+        this.handleCommandResult(this.editorCommands.mouseDraw(event.data.mousePos.dotX, event.data.mousePos.dotY));
         break;
 
-      case 'edit-chr':
-        this.handleEditChr(event.data.charCode);
+      case 'edit-chr': {
+        const result = this.editorCommands.editChr(event.data.charCode);
+        this.definitionRenderer.setSelectedChar(event.data.charCode);
+        this.handleCommandResult(result);
         break;
+      }
 
-      case 'set-chr':
-        this.handleSetChr(event.data.charCode);
+      case 'set-chr': {
+        const result = this.editorCommands.setChr(event.data.charCode);
+        if (result.needsRender) {
+          this.definitionRenderer.render();
+        }
+        this.handleCommandResult(result);
         break;
+      }
 
-      case 'load-chr':
-        this.handleLoadChr(event.data.source, event.data.charCode);
+      case 'load-chr': {
+        const result = this.editorCommands.loadChr(
+          event.data.source,
+          event.data.charCode,
+          (code) => this.x1Renderer.getFontData(code)
+        );
+        this.handleCommandResult(result);
         break;
+      }
 
       case 'rotation':
-        this.handleRotation(event.data.rotationType);
+        this.handleCommandResult(this.editorCommands.rotation(event.data.rotationType));
         break;
 
-      case 'transfer':
-        this.handleTransfer(event.data.transfer);
+      case 'transfer': {
+        const result = this.editorCommands.transfer(
+          event.data.transfer.start,
+          event.data.transfer.end,
+          event.data.transfer.target
+        );
+        if (result.needsRender) {
+          this.definitionRenderer.render();
+        }
+        this.handleCommandResult(result);
         break;
+      }
 
       case 'clear':
-        this.handleClear();
+        this.handleCommandResult(this.editorCommands.clear());
         break;
 
       case 'color-change':
-        this.handleColorChange(event.data.colorMap);
+        this.handleCommandResult(this.editorCommands.colorChange(event.data.colorMap));
         break;
 
       case 'file-save':
@@ -277,123 +289,50 @@ class DEFCHRApp {
   }
 
   /**
-   * カーソル移動処理
+   * コマンド結果を処理
    */
-  private handleCursorMove(direction: Direction, fast: boolean): void {
-    const pos = this.editorState.cursorPosition;
-    const maxPos = 15;
-    const step = fast ? 2 : 1;  // Shift押下時は2ドット単位
-
-    switch (direction) {
-      case Direction.UP:
-        pos.y = Math.max(0, pos.y - step);
-        break;
-      case Direction.DOWN:
-        pos.y = Math.min(maxPos, pos.y + step);
-        break;
-      case Direction.LEFT:
-        pos.x = Math.max(0, pos.x - step);
-        break;
-      case Direction.RIGHT:
-        pos.x = Math.min(maxPos, pos.x + step);
-        break;
+  private handleCommandResult(result: CommandResult): void {
+    if (result.message) {
+      this.showStatusMessage(result.message);
     }
+    if (result.needsSave) {
+      this.scheduleSave();
+    }
+  }
 
-    this.editorState.lastDirection = direction;
+  /**
+   * 編集モード切り替え（Mキー）
+   */
+  private handleModeChange(): void {
+    const modeNames: Record<EditMode, string> = {
+      [EditMode.SEPARATE]: '4Chr.ベツベツ',
+      [EditMode.VERTICAL]: 'タテ2Chr.',
+      [EditMode.HORIZONTAL]: 'ヨコ2Chr.',
+      [EditMode.ALL]: '4Chr.スベテ'
+    };
+    const newMode = this.editorState.cycleEditMode();
+    this.showStatusMessage(`Mode: ${modeNames[newMode]}`);
     this.scheduleSave();
-  }
-
-  /**
-   * ドット描画処理
-   */
-  private handleDrawDot(color: X1Color): void {
-    const pos = this.editorState.cursorPosition;
-    this.editorState.currentColor = color;
-    this.drawDot(pos.x, pos.y, color);
-    this.moveCursorInDirection();
-  }
-
-  /**
-   * トグル描画処理（Space）
-   */
-  private handleToggleDraw(): void {
-    const pos = this.editorState.cursorPosition;
-
-    // 現在のドットの色を取得（編集バッファから）
-    const charX = Math.floor(pos.x / 8);
-    const charY = Math.floor(pos.y / 8);
-    const localX = pos.x % 8;
-    const localY = pos.y % 8;
-    // 編集バッファは常にcharCode 0-3を使用
-    const bufferCharCode = (charX + charY * 16) & 0xFF;
-
-    const currentPixelColor = this.editBuffer.getPixel(bufferCharCode, localX, localY);
-
-    // トグル: 色があれば消す、なければ現在の選択色で描画
-    if (currentPixelColor === X1_COLORS.BLACK) {
-      this.drawDot(pos.x, pos.y, this.editorState.currentColor);
-    } else {
-      this.drawDot(pos.x, pos.y, X1_COLORS.BLACK);
-    }
-
-    this.moveCursorInDirection();
-  }
-
-  /**
-   * ホーム位置に移動（Home）
-   */
-  private handleHome(): void {
-    this.editorState.cursorPosition = { x: 0, y: 0 };
-    this.showStatusMessage('Cursor: HOME');
   }
 
   /**
    * 方向切り替え（Dキー）
    */
-  private cycleDirection(): void {
-    const directions = [Direction.RIGHT, Direction.DOWN, Direction.LEFT, Direction.UP];
-    const dirSymbols: Record<Direction, string> = {
-      [Direction.UP]: '^',
-      [Direction.DOWN]: 'v',
-      [Direction.LEFT]: '<',
-      [Direction.RIGHT]: '>'
-    };
-    const currentIndex = directions.indexOf(this.editorState.lastDirection);
-    this.editorState.lastDirection = directions[(currentIndex + 1) % directions.length];
-    this.showStatusMessage(`Direction: ${dirSymbols[this.editorState.lastDirection]}`);
+  private handleDirectionChange(): void {
+    const dirSymbols = { up: '^', down: 'v', left: '<', right: '>' };
+    const newDir = this.editorState.cycleDirection();
+    this.showStatusMessage(`Direction: ${dirSymbols[newDir]}`);
     this.scheduleSave();
   }
-
-  /** グリッド表示状態（デフォルトは非表示） */
-  private gridVisible: boolean = false;
-
-  /** 入力デバイスモード */
-  private inputDeviceMode: InputDeviceMode = 'keyboard';
 
   /**
    * グリッド表示切り替え（Gキー）
    */
-  private toggleGrid(): void {
-    this.gridVisible = !this.gridVisible;
-    this.editorRenderer.setShowGrid(this.gridVisible);
-    this.showStatusMessage(`Grid: ${this.gridVisible ? 'ON' : 'OFF'}`);
+  private handleToggleGrid(): void {
+    const visible = this.editorState.toggleGrid();
+    this.editorRenderer.setShowGrid(visible);
+    this.showStatusMessage(`Grid: ${visible ? 'ON' : 'OFF'}`);
     this.scheduleSave();
-  }
-
-  /**
-   * 色選択（マウスモード時の数字キー）
-   */
-  private handleColorSelect(color: X1Color): void {
-    this.editorState.currentColor = color;
-    this.showStatusMessage(`Color: ${color}`);
-  }
-
-  /**
-   * 入力デバイスモード切り替え（Kキー）
-   */
-  private toggleInputDeviceMode(): void {
-    this.inputDeviceMode = this.inputHandler.getInputDeviceMode();
-    this.showStatusMessage(`Input: ${this.inputDeviceMode === 'keyboard' ? 'Keyboard' : 'Mouse'}`);
   }
 
   /**
@@ -436,261 +375,6 @@ class DEFCHRApp {
     };
 
     input.click();
-  }
-
-  /**
-   * マウスでドット描画
-   */
-  private handleMouseDraw(dotX: number, dotY: number): void {
-    this.drawDot(dotX, dotY, this.editorState.currentColor);
-    // カーソル位置も更新
-    this.editorState.cursorPosition = { x: dotX, y: dotY };
-  }
-
-  /**
-   * EDIT CHR.処理（Cキー - 文字コード選択）
-   */
-  private handleEditChr(charCode: number): void {
-    this.editorState.currentCharCode = charCode;
-    this.definitionRenderer.setSelectedChar(charCode);
-    this.showStatusMessage(`Edit CHR: $${charCode.toString(16).toUpperCase().padStart(2, '0')}`);
-    this.scheduleSave();
-  }
-
-  /**
-   * LOAD CHR.処理（Eキー - ROMCG/RAMCGからロード）
-   * 編集バッファにのみ書き込み、定義エリア（pcgData）は変更しない
-   * @param source 'rom' = ROMフォント、'ram' = PCGデータ
-   * @param charCode 読み込む文字コード
-   */
-  private handleLoadChr(source: 'rom' | 'ram', charCode: number): void {
-    const cursorPos = this.editorState.cursorPosition;
-    const srcName = source === 'rom' ? 'ROMCG' : 'RAMCG';
-
-    // カーソル位置から文字オフセットを計算（0-1, 0-1）
-    const charX = Math.floor(cursorPos.x / 8);
-    const charY = Math.floor(cursorPos.y / 8);
-
-    // EDIT CHR.(XX)の表示用に文字コードを保存
-    this.editorState.editChrCode = charCode;
-
-    // 編集バッファに書き込む関数（pcgDataは変更しない）
-    const loadCharacter = (srcCode: number, dstBufferCode: number) => {
-      if (source === 'rom') {
-        // ROMフォントからロード（モノクロ→白色）
-        const fontData = this.x1Renderer.getFontData(srcCode);
-        for (let y = 0; y < 8; y++) {
-          for (let x = 0; x < 8; x++) {
-            const isSet = (fontData[y] & (0x80 >> x)) !== 0;
-            this.editBuffer.setPixel(dstBufferCode, x, y, isSet ? X1_COLORS.WHITE : X1_COLORS.BLACK);
-          }
-        }
-      } else {
-        // RAMCGからロード（pcgDataから編集バッファにコピー）
-        const srcData = this.pcgData.getCharacter(srcCode);
-        this.editBuffer.setCharacter(dstBufferCode, new Uint8Array(srcData));
-      }
-    };
-
-    // 編集モードとカーソル位置に応じて編集バッファに書き込む
-    switch (this.editorState.editMode) {
-      case EditMode.SEPARATE:
-        // 1文字モード: カーソル位置の1文字エリアに反映
-        // 編集バッファのcharCode = charX + charY * 16
-        loadCharacter(charCode, charX + charY * 16);
-        break;
-
-      case EditMode.HORIZONTAL:
-        // 横2文字モード: カーソル位置を含む横2文字エリアに反映
-        // 編集バッファの左(0 or 16)と右(1 or 17)に書き込む
-        loadCharacter(charCode, charY * 16);
-        loadCharacter((charCode + 1) & 0xFF, charY * 16 + 1);
-        break;
-
-      case EditMode.VERTICAL:
-        // 縦2文字モード: カーソル位置を含む縦2文字エリアに反映
-        // 編集バッファの上(0 or 1)と下(16 or 17)に書き込む
-        loadCharacter(charCode, charX);
-        loadCharacter((charCode + 16) & 0xFF, charX + 16);
-        break;
-
-      case EditMode.ALL:
-        // 4文字モード: 全4文字エリアに反映
-        loadCharacter(charCode, 0);
-        loadCharacter((charCode + 1) & 0xFF, 1);
-        loadCharacter((charCode + 16) & 0xFF, 16);
-        loadCharacter((charCode + 17) & 0xFF, 17);
-        break;
-    }
-
-    this.showStatusMessage(`Load ${srcName}: $${charCode.toString(16).toUpperCase().padStart(2, '0')}`);
-    this.scheduleSave();
-  }
-
-  /**
-   * SET CHR.処理
-   * カーソル位置に応じた編集バッファの内容を指定キャラクターコードに転送する
-   */
-  private handleSetChr(charCode: number): void {
-    const cursorPos = this.editorState.cursorPosition;
-
-    // カーソル位置から文字オフセットを計算（0-1, 0-1）
-    const charX = Math.floor(cursorPos.x / 8);
-    const charY = Math.floor(cursorPos.y / 8);
-
-    // 編集バッファからpcgDataにコピー
-    switch (this.editorState.editMode) {
-      case EditMode.SEPARATE:
-        // 1文字モード: カーソル位置の1文字だけコピー
-        // 編集バッファのcharX + charY * 16 → pcgDataのcharCode
-        {
-          const srcBufferCode = charX + charY * 16;
-          this.pcgData.setCharacter(charCode, new Uint8Array(this.editBuffer.getCharacter(srcBufferCode)));
-        }
-        break;
-
-      case EditMode.VERTICAL:
-        // 縦2文字モード: カーソルがある列の縦2文字をコピー
-        // 編集バッファの上(charX)と下(charX+16) → pcgDataのcharCodeとcharCode+16
-        {
-          const srcTop = charX;
-          const srcBottom = charX + 16;
-          this.pcgData.setCharacter(charCode, new Uint8Array(this.editBuffer.getCharacter(srcTop)));
-          this.pcgData.setCharacter((charCode + 16) & 0xFF, new Uint8Array(this.editBuffer.getCharacter(srcBottom)));
-        }
-        break;
-
-      case EditMode.HORIZONTAL:
-        // 横2文字モード: カーソルがある行の横2文字をコピー
-        // 編集バッファの左(charY*16)と右(charY*16+1) → pcgDataのcharCodeとcharCode+1
-        {
-          const srcLeft = charY * 16;
-          const srcRight = charY * 16 + 1;
-          this.pcgData.setCharacter(charCode, new Uint8Array(this.editBuffer.getCharacter(srcLeft)));
-          this.pcgData.setCharacter((charCode + 1) & 0xFF, new Uint8Array(this.editBuffer.getCharacter(srcRight)));
-        }
-        break;
-
-      case EditMode.ALL:
-        // 4文字モード: 全4文字をコピー
-        // 編集バッファの0,1,16,17 → pcgDataのcharCode,+1,+16,+17
-        {
-          this.pcgData.setCharacter(charCode, new Uint8Array(this.editBuffer.getCharacter(0)));
-          this.pcgData.setCharacter((charCode + 1) & 0xFF, new Uint8Array(this.editBuffer.getCharacter(1)));
-          this.pcgData.setCharacter((charCode + 16) & 0xFF, new Uint8Array(this.editBuffer.getCharacter(16)));
-          this.pcgData.setCharacter((charCode + 17) & 0xFF, new Uint8Array(this.editBuffer.getCharacter(17)));
-        }
-        break;
-    }
-
-    // 定義エリアを更新（SET CHR.実行時のみ）
-    this.definitionRenderer.render();
-
-    this.showStatusMessage(`Set CHR: $${charCode.toString(16).toUpperCase().padStart(2, '0')}`);
-    this.scheduleSave();
-  }
-
-  /**
-   * ROTATION処理
-   * 編集バッファの対象エリアを回転・移動・フリップする
-   */
-  private handleRotation(rotationType: RotationType): void {
-    const cursorPos = this.editorState.cursorPosition;
-
-    const success = EditBufferTransform.apply(
-      this.editBuffer,
-      this.editorState.editMode,
-      cursorPos.x,
-      cursorPos.y,
-      rotationType
-    );
-
-    if (!success) {
-      this.showStatusMessage('Invalid for this mode');
-      return;
-    }
-
-    this.showStatusMessage(EditBufferTransform.getTransformName(rotationType));
-    this.scheduleSave();
-  }
-
-  /**
-   * CLEAR処理
-   * 編集バッファの対象エリアを黒（0）でクリア
-   */
-  private handleClear(): void {
-    const cursorPos = this.editorState.cursorPosition;
-    const { charX, charY } = getCursorCharPos(cursorPos.x, cursorPos.y);
-
-    // 編集モードに応じた対象エリアを取得
-    const { charCodes } = getEditArea(this.editorState.editMode, charX, charY);
-
-    // 対象エリアのすべてのピクセルを黒でクリア
-    for (const charCode of charCodes) {
-      for (let y = 0; y < 8; y++) {
-        for (let x = 0; x < 8; x++) {
-          this.editBuffer.setPixel(charCode, x, y, X1_COLORS.BLACK);
-        }
-      }
-    }
-
-    this.showStatusMessage('Cleared');
-    this.scheduleSave();
-  }
-
-  /**
-   * COLOR CHANGE処理
-   * 編集バッファの対象エリアの色を変換する
-   * @param colorMap 8要素の配列。colorMap[i]は色iを色colorMap[i]に変換する
-   */
-  private handleColorChange(colorMap: number[]): void {
-    const cursorPos = this.editorState.cursorPosition;
-    const { charX, charY } = getCursorCharPos(cursorPos.x, cursorPos.y);
-
-    // 編集モードに応じた対象エリアを取得
-    const { charCodes } = getEditArea(this.editorState.editMode, charX, charY);
-
-    // 対象エリアの各ピクセルの色を変換
-    for (const charCode of charCodes) {
-      for (let y = 0; y < 8; y++) {
-        for (let x = 0; x < 8; x++) {
-          const currentColor = this.editBuffer.getPixel(charCode, x, y);
-          const newColor = colorMap[currentColor] as X1Color;
-          if (newColor !== currentColor) {
-            this.editBuffer.setPixel(charCode, x, y, newColor);
-          }
-        }
-      }
-    }
-
-    this.showStatusMessage('Color changed');
-    this.scheduleSave();
-  }
-
-  /**
-   * TRANSFER処理
-   * 定義エリア（pcgData）の文字をコピー
-   */
-  private handleTransfer(transfer: { start: number; end: number; target: number }): void {
-    const { start, end, target } = transfer;
-    const count = end - start + 1;
-
-    if (count <= 0 || target + count > 256) {
-      this.showStatusMessage('Invalid range');
-      return;
-    }
-
-    // コピー実行
-    for (let i = 0; i < count; i++) {
-      const srcData = this.pcgData.getCharacter(start + i);
-      this.pcgData.setCharacter(target + i, new Uint8Array(srcData));
-    }
-
-    // 定義エリアを更新
-    this.definitionRenderer.render();
-
-    this.showStatusMessage(`Transfer: $${start.toString(16).toUpperCase().padStart(2, '0')}-$${end.toString(16).toUpperCase().padStart(2, '0')} -> $${target.toString(16).toUpperCase().padStart(2, '0')}`);
-    this.scheduleSave();
   }
 
   /**
@@ -812,61 +496,6 @@ class DEFCHRApp {
   }
 
   /**
-   * ドットを描画（編集バッファに描画）
-   */
-  private drawDot(x: number, y: number, color: X1Color): void {
-    const charX = Math.floor(x / 8);
-    const charY = Math.floor(y / 8);
-    const localX = x % 8;
-    const localY = y % 8;
-
-    // 編集バッファは常にcharCode 0-3を使用（左上=0, 右上=1, 左下=16, 右下=17）
-    const bufferCharCode = (charX + charY * 16) & 0xFF;
-    this.editBuffer.setPixel(bufferCharCode, localX, localY, color);
-    this.scheduleSave();
-  }
-
-  /**
-   * カーソルを最後の移動方向に進める
-   */
-  private moveCursorInDirection(): void {
-    const pos = this.editorState.cursorPosition;
-    const maxPos = 15;
-
-    switch (this.editorState.lastDirection) {
-      case Direction.UP:
-        if (pos.y > 0) pos.y--;
-        break;
-      case Direction.DOWN:
-        if (pos.y < maxPos) pos.y++;
-        break;
-      case Direction.LEFT:
-        if (pos.x > 0) pos.x--;
-        break;
-      case Direction.RIGHT:
-        if (pos.x < maxPos) pos.x++;
-        break;
-    }
-  }
-
-  /**
-   * 編集モードを切り替え
-   */
-  private cycleEditMode(): void {
-    const modes = [EditMode.SEPARATE, EditMode.VERTICAL, EditMode.HORIZONTAL, EditMode.ALL];
-    const modeNames: Record<EditMode, string> = {
-      [EditMode.SEPARATE]: '4Chr.ベツベツ',
-      [EditMode.VERTICAL]: 'タテ2Chr.',
-      [EditMode.HORIZONTAL]: 'ヨコ2Chr.',
-      [EditMode.ALL]: '4Chr.スベテ'
-    };
-    const currentIndex = modes.indexOf(this.editorState.editMode);
-    this.editorState.editMode = modes[(currentIndex + 1) % modes.length];
-    this.showStatusMessage(`Mode: ${modeNames[this.editorState.editMode]}`);
-    this.scheduleSave();
-  }
-
-  /**
    * 自動保存をスケジュール
    */
   private scheduleSave(): void {
@@ -880,15 +509,7 @@ class DEFCHRApp {
     return {
       pcgData: this.pcgData.getAllData(),
       editBuffer: this.editBuffer.getAllData(),
-      editorState: {
-        editMode: this.editorState.editMode,
-        cursorPosition: this.editorState.cursorPosition,
-        currentColor: this.editorState.currentColor,
-        lastDirection: this.editorState.lastDirection,
-        currentCharCode: this.editorState.currentCharCode,
-        editChrCode: this.editorState.editChrCode,
-        gridVisible: this.gridVisible
-      },
+      editorState: this.editorState.toSaveData(),
       fontData: this.x1Renderer.getAllFontData() || undefined
     };
   }
@@ -910,16 +531,10 @@ class DEFCHRApp {
     this.editBuffer.setAllData(saved.editBuffer);
 
     // エディタ状態を復元
-    this.editorState.editMode = saved.editorState.editMode;
-    this.editorState.cursorPosition = saved.editorState.cursorPosition;
-    this.editorState.currentColor = saved.editorState.currentColor;
-    this.editorState.lastDirection = saved.editorState.lastDirection;
-    this.editorState.currentCharCode = saved.editorState.currentCharCode;
-    this.editorState.editChrCode = saved.editorState.editChrCode;
-    this.gridVisible = saved.editorState.gridVisible;
+    this.editorState.fromSaveData(saved.editorState);
 
     // グリッド表示状態を反映
-    this.editorRenderer.setShowGrid(this.gridVisible);
+    this.editorRenderer.setShowGrid(this.editorState.gridVisible);
 
     // 選択中のキャラクターを反映
     this.definitionRenderer.setSelectedChar(this.editorState.currentCharCode);
@@ -983,11 +598,14 @@ class DEFCHRApp {
     // 編集エリア枠
     this.screenLayout.drawEditorFrame();
 
+    // カーソル位置をPosition形式で渡す
+    const cursorPosition = { x: this.editorState.cursorX, y: this.editorState.cursorY };
+
     // 編集エリア描画（編集バッファは常にcharCode 0から）
     this.editorRenderer.render(
       0,  // 編集バッファのベースコードは常に0
       this.editorState.editMode,
-      this.editorState.cursorPosition
+      cursorPosition
     );
 
     // 定義エリア枠
@@ -1003,7 +621,7 @@ class DEFCHRApp {
       this.editorState.editChrCode,  // EDIT CHR.(XX)の表示用
       this.editorState.lastDirection,  // カーソル移動方向
       this.editorState.currentColor,   // カレントカラー
-      this.inputDeviceMode             // 入力デバイスモード
+      this.inputHandler.getInputDeviceMode()  // 入力デバイスモード
     );
 
     // プレビュー表示（右下 座標35,22）
@@ -1013,7 +631,7 @@ class DEFCHRApp {
       22 * 8,  // y = 176
       0,  // 編集バッファのベースコードは常に0
       this.editorState.editMode,
-      this.editorState.cursorPosition
+      cursorPosition
     );
 
     // ステータスメッセージ（一時表示）
