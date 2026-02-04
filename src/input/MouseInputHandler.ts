@@ -49,9 +49,19 @@ export class MouseInputHandler {
   /** モード取得コールバック */
   private getMode: GetModeCallback;
 
+  /** バインドされたイベントハンドラ（removeEventListener用） */
+  private boundHandleMouseDown: (e: MouseEvent) => void;
+  private boundHandleMouseMove: (e: MouseEvent) => void;
+  private boundHandleMouseUp: () => void;
+
   constructor(emit: EmitCallback, getMode: GetModeCallback) {
     this.emit = emit;
     this.getMode = getMode;
+
+    // バインドされたハンドラを作成（removeEventListener用）
+    this.boundHandleMouseDown = (e: MouseEvent) => this.handleMouseDown(e);
+    this.boundHandleMouseMove = (e: MouseEvent) => this.handleMouseMove(e);
+    this.boundHandleMouseUp = () => this.handleMouseUp();
   }
 
   /**
@@ -61,10 +71,10 @@ export class MouseInputHandler {
     this.canvas = document.getElementById('main-canvas') as HTMLCanvasElement;
     if (!this.canvas) return;
 
-    this.canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
-    this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
-    this.canvas.addEventListener('mouseup', () => this.handleMouseUp());
-    this.canvas.addEventListener('mouseleave', () => this.handleMouseUp());
+    this.canvas.addEventListener('mousedown', this.boundHandleMouseDown);
+    this.canvas.addEventListener('mousemove', this.boundHandleMouseMove);
+    this.canvas.addEventListener('mouseup', this.boundHandleMouseUp);
+    this.canvas.addEventListener('mouseleave', this.boundHandleMouseUp);
   }
 
   /**
@@ -149,6 +159,12 @@ export class MouseInputHandler {
    * リソースを解放
    */
   dispose(): void {
+    if (this.canvas) {
+      this.canvas.removeEventListener('mousedown', this.boundHandleMouseDown);
+      this.canvas.removeEventListener('mousemove', this.boundHandleMouseMove);
+      this.canvas.removeEventListener('mouseup', this.boundHandleMouseUp);
+      this.canvas.removeEventListener('mouseleave', this.boundHandleMouseUp);
+    }
     this.isMouseDrawing = false;
     this.canvas = null;
   }

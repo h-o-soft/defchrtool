@@ -51,6 +51,10 @@ export class KeyboardInputHandler {
   /** プロンプトコールバック */
   private promptCallback: ((value: string | null) => void) | null = null;
 
+  /** バインドされたイベントハンドラ（removeEventListener用） */
+  private boundHandleKeyDown: (e: KeyboardEvent) => void;
+  private boundHandleKeyUp: (e: KeyboardEvent) => void;
+
   constructor(
     emit: EmitCallback,
     getMode: GetModeCallback,
@@ -65,14 +69,18 @@ export class KeyboardInputHandler {
     this.getInputDeviceMode = getInputDeviceMode;
     this.toggleInputDeviceMode = toggleInputDeviceMode;
     this.panelManager = panelManager;
+
+    // バインドされたハンドラを作成（removeEventListener用）
+    this.boundHandleKeyDown = (e: KeyboardEvent) => this.handleKeyDown(e);
+    this.boundHandleKeyUp = (e: KeyboardEvent) => this.handleKeyUp(e);
   }
 
   /**
    * キーボードイベントリスナーを設定
    */
   setup(): void {
-    window.addEventListener('keydown', (e) => this.handleKeyDown(e));
-    window.addEventListener('keyup', (e) => this.handleKeyUp(e));
+    window.addEventListener('keydown', this.boundHandleKeyDown);
+    window.addEventListener('keyup', this.boundHandleKeyUp);
   }
 
   /**
@@ -420,6 +428,8 @@ export class KeyboardInputHandler {
    * リソースを解放
    */
   dispose(): void {
+    window.removeEventListener('keydown', this.boundHandleKeyDown);
+    window.removeEventListener('keyup', this.boundHandleKeyUp);
     this.pressedKeys.clear();
     this.promptCallback = null;
   }
