@@ -69,6 +69,9 @@ export class InputPanelManager {
   private emit: EmitCallback;
   private setMode: SetModeCallback;
 
+  /** イベントリスナー解除用AbortController */
+  private abortController: AbortController | null = null;
+
   constructor(emit: EmitCallback, setMode: SetModeCallback) {
     this.emit = emit;
     this.setMode = setMode;
@@ -78,6 +81,10 @@ export class InputPanelManager {
    * 入力UIの初期化
    */
   setup(): void {
+    // 既存のリスナーを解除
+    this.abortController?.abort();
+    this.abortController = new AbortController();
+
     this.setupInputArea();
     this.setupRotationArea();
     this.setupTransferArea();
@@ -103,7 +110,7 @@ export class InputPanelManager {
           e.preventDefault();
           this.completeInput(null);
         }
-      });
+      }, { signal: this.abortController!.signal });
     }
   }
 
@@ -123,7 +130,7 @@ export class InputPanelManager {
           e.preventDefault();
           this.completeRotation(null);
         }
-      });
+      }, { signal: this.abortController!.signal });
     }
   }
 
@@ -149,7 +156,7 @@ export class InputPanelManager {
           } else if (e.code === 'Tab' && !e.shiftKey && index < 2) {
             // 次のフィールドへ（デフォルト動作に任せる）
           }
-        });
+        }, { signal: this.abortController!.signal });
       }
     });
   }
@@ -180,7 +187,7 @@ export class InputPanelManager {
             e.preventDefault();
             this.cancelColorChange();
           }
-        });
+        }, { signal: this.abortController!.signal });
       }
     }
   }
@@ -208,19 +215,19 @@ export class InputPanelManager {
 
     // フォーマット変更時の処理
     this.progFormatRadios?.forEach(radio => {
-      radio.addEventListener('change', () => this.updateProgrammingUI());
+      radio.addEventListener('change', () => this.updateProgrammingUI(), { signal: this.abortController!.signal });
     });
 
     // モード変更時の処理
     this.progModeRadios?.forEach(radio => {
-      radio.addEventListener('change', () => this.updateProgrammingUI());
+      radio.addEventListener('change', () => this.updateProgrammingUI(), { signal: this.abortController!.signal });
     });
 
     // EXECボタン
-    this.progExecBtn?.addEventListener('click', () => this.executeProgramming());
+    this.progExecBtn?.addEventListener('click', () => this.executeProgramming(), { signal: this.abortController!.signal });
 
     // CANCELボタン
-    this.progCancelBtn?.addEventListener('click', () => this.cancelProgramming());
+    this.progCancelBtn?.addEventListener('click', () => this.cancelProgramming(), { signal: this.abortController!.signal });
   }
 
   // ==================== 表示/非表示 ====================
@@ -614,6 +621,8 @@ export class InputPanelManager {
    * リソースを解放
    */
   dispose(): void {
+    this.abortController?.abort();
+    this.abortController = null;
     this.promptCallback = null;
   }
 }
