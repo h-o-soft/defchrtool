@@ -1,16 +1,16 @@
 /**
  * 定義エリアレンダラー
  * 256文字のPCG一覧を表示する（16x16グリッド）
+ *
+ * パフォーマンス最適化:
+ * - 必要な時のみ全描画（SET CHR / TRANSFER / LOAD時）
+ * - 色文字列のキャッシュ利用
  */
 
 import { PCGData } from '../core/PCGData';
 import { CanvasManager } from './CanvasManager';
-import {
-  FONT_WIDTH,
-  FONT_HEIGHT,
-  X1_COLOR_RGB,
-  X1_COLORS
-} from '../core/types';
+import { FONT_WIDTH, FONT_HEIGHT, X1_COLORS } from '../core/types';
+import { getColorString } from '../core/ColorCache';
 
 /** 1文字の表示サイズ */
 const CHAR_DISPLAY_SIZE = 8;
@@ -30,6 +30,9 @@ export class DefinitionRenderer {
   /** 選択中のキャラクターコード */
   private selectedCharCode: number = 0;
 
+  /** 再描画が必要かどうか */
+  private needsRender: boolean = true;
+
   constructor(canvasManager: CanvasManager, pcgData: PCGData) {
     this.canvasManager = canvasManager;
     this.pcgData = pcgData;
@@ -41,6 +44,7 @@ export class DefinitionRenderer {
   setOffset(x: number, y: number): void {
     this.offsetX = x;
     this.offsetY = y;
+    this.needsRender = true;
   }
 
   /**
@@ -51,9 +55,22 @@ export class DefinitionRenderer {
   }
 
   /**
+   * 再描画が必要であることをマーク
+   * SET CHR / TRANSFER / ファイル読み込み時に呼ぶ
+   */
+  markNeedsRender(): void {
+    this.needsRender = true;
+  }
+
+  /**
    * 256文字の一覧を描画
+   * needsRenderがtrueの時のみ描画し、falseの時は何もしない
    */
   render(): void {
+    if (!this.needsRender) {
+      return;
+    }
+
     const ctx = this.canvasManager.getBackContext();
 
     // 背景（黒）
@@ -71,12 +88,11 @@ export class DefinitionRenderer {
       this.drawCharacter(ctx, x, y, charCode);
     }
 
-    // 選択中のキャラクターをハイライト（現在未使用）
-    // this.drawSelection(ctx);
+    this.needsRender = false;
   }
 
   /**
-   * 1文字を描画（8色対応）
+   * 1文字を描画（8色対応、キャッシュ利用）
    */
   private drawCharacter(ctx: CanvasRenderingContext2D, x: number, y: number, charCode: number): void {
     for (let py = 0; py < FONT_HEIGHT; py++) {
@@ -85,8 +101,7 @@ export class DefinitionRenderer {
 
         // 黒以外のピクセルを描画
         if (color !== X1_COLORS.BLACK) {
-          const [r, g, b] = X1_COLOR_RGB[color];
-          ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+          ctx.fillStyle = getColorString(color);
           ctx.fillRect(x + px, y + py, 1, 1);
         }
       }
@@ -110,7 +125,7 @@ export class DefinitionRenderer {
   }
 
   /**
-   * 特定のキャラクターのみ再描画
+   * 特定のキャラクターのみ再描画（外部からの直接呼び出し用）
    */
   renderCharacter(charCode: number): void {
     const ctx = this.canvasManager.getBackContext();

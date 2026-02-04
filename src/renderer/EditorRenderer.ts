@@ -1,19 +1,17 @@
 /**
  * 編集エリアレンダラー
  * 8x8ドット（または16x16）の編集領域を描画する
+ *
+ * パフォーマンス最適化:
+ * - ●パターンのキャッシュ
+ * - 色文字列のキャッシュ利用
  */
 
 import { PCGData } from '../core/PCGData';
 import { CanvasManager } from './CanvasManager';
 import { X1Renderer } from './X1Renderer';
-import {
-  FONT_WIDTH,
-  FONT_HEIGHT,
-  X1_COLOR_RGB,
-  X1_COLORS,
-  EditMode,
-  Position
-} from '../core/types';
+import { FONT_WIDTH, FONT_HEIGHT, X1_COLORS, EditMode, Position } from '../core/types';
+import { getColorString, BLACK_STRING } from '../core/ColorCache';
 
 /** 編集エリアのドットサイズ（拡大表示用） */
 const DOT_SIZE = 8;
@@ -36,6 +34,9 @@ export class EditorRenderer {
   /** カーソル点滅用タイマー */
   private cursorVisible: boolean = true;
   private cursorBlinkInterval: number | null = null;
+
+  /** ●パターンのキャッシュ（0xE0のフォントデータ） */
+  private circlePattern: Uint8Array | null = null;
 
   constructor(canvasManager: CanvasManager, pcgData: PCGData, x1Renderer: X1Renderer) {
     this.canvasManager = canvasManager;
@@ -82,6 +83,24 @@ export class EditorRenderer {
   }
 
   /**
+   * ●パターンを取得（遅延キャッシュ）
+   */
+  private getCirclePattern(): Uint8Array {
+    if (!this.circlePattern) {
+      // 初回のみフォントデータを取得してキャッシュ
+      this.circlePattern = this.x1Renderer.getFontData(0xE0);
+    }
+    return this.circlePattern;
+  }
+
+  /**
+   * ●パターンのキャッシュをクリア（フォント変更時に呼ぶ）
+   */
+  clearPatternCache(): void {
+    this.circlePattern = null;
+  }
+
+  /**
    * 編集エリアを描画（2x2文字 = 16x16ドット）
    * @param baseCharCode 左上のキャラクターコード
    * @param editMode 編集モード
@@ -95,8 +114,11 @@ export class EditorRenderer {
     const areaHeight = 16 * DOT_SIZE; // 128px
 
     // 背景（黒）
-    ctx.fillStyle = '#000000';
+    ctx.fillStyle = BLACK_STRING;
     ctx.fillRect(this.offsetX, this.offsetY, areaWidth, areaHeight);
+
+    // ●パターンをキャッシュから取得
+    const circlePattern = this.getCirclePattern();
 
     // 4文字分のPCGデータを描画（●文字パターンを使用）
     for (let charY = 0; charY < 2; charY++) {
@@ -111,8 +133,8 @@ export class EditorRenderer {
             const drawX = this.offsetX + charX * FONT_WIDTH * DOT_SIZE + x * DOT_SIZE;
             const drawY = this.offsetY + charY * FONT_HEIGHT * DOT_SIZE + y * DOT_SIZE;
 
-            // ●パターンで描画（DOT_SIZE = 8なので1:1対応）
-            this.drawCircleDot(ctx, drawX, drawY, color);
+            // ●パターンで描画（キャッシュ使用）
+            this.drawCircleDotCached(ctx, drawX, drawY, color, circlePattern);
           }
         }
       }
@@ -135,27 +157,22 @@ export class EditorRenderer {
   }
 
   /**
-   * ●パターンでドットを描画
+   * ●パターンでドットを描画（キャッシュ版）
    */
-  private drawCircleDot(
+  private drawCircleDotCached(
     ctx: CanvasRenderingContext2D,
     x: number,
     y: number,
-    color: number
+    color: number,
+    circlePattern: Uint8Array
   ): void {
-    const [r, g, b] = X1_COLOR_RGB[color as keyof typeof X1_COLOR_RGB];
+    const colorStr = getColorString(color as 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7);
 
-    // ROMフォントの0xE0（●）を使用
-    const circlePattern = this.x1Renderer.getFontData(0xE0);
     for (let py = 0; py < 8; py++) {
       const rowBits = circlePattern[py];
       for (let px = 0; px < 8; px++) {
         const isSet = (rowBits & (0x80 >> px)) !== 0;
-        if (isSet) {
-          ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-        } else {
-          ctx.fillStyle = 'rgb(0, 0, 0)';
-        }
+        ctx.fillStyle = isSet ? colorStr : BLACK_STRING;
         ctx.fillRect(x + px, y + py, 1, 1);
       }
     }
@@ -312,8 +329,7 @@ export class EditorRenderer {
           for (let px = 0; px < FONT_WIDTH; px++) {
             const color = this.pcgData.getPixel(charCode, px, py);
             if (color !== X1_COLORS.BLACK) {
-              const [r, g, b] = X1_COLOR_RGB[color];
-              ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+              ctx.fillStyle = getColorString(color);
               ctx.fillRect(x + charX * 8 + px, y + charY * 8 + py, 1, 1);
             }
           }
