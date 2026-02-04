@@ -351,17 +351,6 @@ export class ScreenLayout {
   }
 
   /**
-   * ステータス行をクリア（1行）
-   * @param row 行番号
-   */
-  clearStatusLine(row: number): void {
-    const ctx = this.x1Renderer.getBackContext();
-    const y = row * CHAR_HEIGHT;
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, y, 320, CHAR_HEIGHT);
-  }
-
-  /**
    * 編集エリアの内部座標（ピクセル）を取得
    */
   getEditorAreaPixelOffset(): { x: number; y: number } {

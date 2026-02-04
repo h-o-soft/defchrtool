@@ -36,12 +36,9 @@ class DEFCHRApp {
   /** アニメーションフレームID */
   private animationFrameId: number | null = null;
 
-  /** ステータスメッセージ（一時表示用） */
-  private statusMessage: string = '';
+  /** ステータスメッセージ用DOM要素 */
+  private statusElement: HTMLElement | null = null;
   private statusMessageTimeout: number | null = null;
-
-  /** 前回のステータスメッセージ（クリア判定用） */
-  private prevStatusMessage: string = '';
 
   /** 静的要素の描画が必要かどうか（初回・モード切替時） */
   private needsStaticRender: boolean = true;
@@ -212,7 +209,6 @@ class DEFCHRApp {
 
       case 'color-select':
         this.editorState.setColor(event.data.color);
-        this.showStatusMessage(`Color: ${event.data.color}`);
         break;
 
       case 'toggle-input-mode':
@@ -377,11 +373,11 @@ class DEFCHRApp {
           this.showStatusMessage(`Font loaded: ${file.name}`);
           this.scheduleSave();
         } else {
-          this.showStatusMessage('Font load failed: invalid size');
+          this.showStatusMessage('Font load failed: invalid size', true);
         }
       } catch (e) {
         console.error('[DEFCHRApp] Font load error:', e);
-        this.showStatusMessage('Font load error');
+        this.showStatusMessage('Font load error', true);
       }
     };
 
@@ -427,7 +423,7 @@ class DEFCHRApp {
       this.showStatusMessage(`Saved: ${fileName}`);
     } catch (e) {
       console.error('[DEFCHRApp] File save error:', e);
-      this.showStatusMessage(e instanceof Error ? e.message : 'Save failed');
+      this.showStatusMessage(e instanceof Error ? e.message : 'Save failed', true);
     }
   }
 
@@ -487,7 +483,7 @@ class DEFCHRApp {
         this.scheduleSave();
       } catch (e) {
         console.error('[DEFCHRApp] File load error:', e);
-        this.showStatusMessage(e instanceof Error ? e.message : 'Load failed');
+        this.showStatusMessage(e instanceof Error ? e.message : 'Load failed', true);
       }
     };
 
@@ -562,19 +558,35 @@ class DEFCHRApp {
   }
 
   /**
-   * ステータスメッセージを表示（一定時間後に消える）
+   * ステータスメッセージを表示
+   * Web UI（DOM要素）に表示
+   * @param message 表示するメッセージ
+   * @param isError trueの場合は赤色で表示し、自動消去しない
    */
-  private showStatusMessage(message: string): void {
-    this.statusMessage = message;
+  private showStatusMessage(message: string, isError: boolean = false): void {
+    if (!this.statusElement) {
+      this.statusElement = document.getElementById('status');
+    }
+
+    if (this.statusElement) {
+      this.statusElement.textContent = message;
+      this.statusElement.style.color = isError ? '#ff6666' : '#00ff88';
+    }
 
     if (this.statusMessageTimeout !== null) {
       clearTimeout(this.statusMessageTimeout);
+      this.statusMessageTimeout = null;
     }
 
-    this.statusMessageTimeout = window.setTimeout(() => {
-      this.statusMessage = '';
-      this.statusMessageTimeout = null;
-    }, STATUS_MESSAGE_DURATION);
+    // エラーでない場合のみ自動消去
+    if (!isError) {
+      this.statusMessageTimeout = window.setTimeout(() => {
+        if (this.statusElement) {
+          this.statusElement.textContent = '';
+        }
+        this.statusMessageTimeout = null;
+      }, STATUS_MESSAGE_DURATION);
+    }
   }
 
   /**
@@ -664,17 +676,6 @@ class DEFCHRApp {
       cursorPosition
     );
 
-    // ステータスメッセージ（変更時のみ更新）
-    if (this.statusMessage !== this.prevStatusMessage) {
-      // ステータス行をクリア
-      this.screenLayout.clearStatusLine(26);
-      // メッセージがあれば描画
-      if (this.statusMessage) {
-        this.x1Renderer.drawText(0, 26 * 8, this.statusMessage, X1_COLORS.WHITE, X1_COLORS.BLACK);
-      }
-      this.prevStatusMessage = this.statusMessage;
-    }
-
     // フリップ
     this.x1Renderer.flip();
   }
@@ -698,9 +699,7 @@ async function main(): Promise<void> {
     if (status) status.textContent = 'Loading font...';
     await app.init();
     app.startRenderLoop();
-    if (status) {
-      status.textContent = 'Ready - Keys: 0-7=draw, Arrows=move, Space=toggle, M=edit mode, E=edit chr., S=set chr., R=rotation, T=transfer, P=file, G=grid';
-    }
+    if (status) status.textContent = '';
     console.log('[Main] Application started successfully');
   } catch (error) {
     console.error('[Main] Failed to start application:', error);
