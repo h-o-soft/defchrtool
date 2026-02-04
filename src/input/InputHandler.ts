@@ -4,82 +4,28 @@
  */
 
 import { Direction, X1Color } from '../core/types';
+import {
+  InputMode,
+  InputDeviceMode,
+  FileFormat,
+  ColorReduceMode,
+  RotationType,
+  BasSaveFormat,
+  InputEvent,
+  InputEventCallback
+} from './InputEventTypes';
 
-/** 入力モード */
-export type InputMode =
-  | 'edit'      // 通常編集モード
-  | 'editchr'   // EDIT CHR.（文字コード入力待ち）
-  | 'setchr'    // SET CHR.（文字コード入力待ち）
-  | 'menu';     // メニュー表示中
-
-/** 入力イベントタイプ */
-export type InputEventType =
-  | 'cursor-move'
-  | 'draw-dot'
-  | 'color-select'
-  | 'toggle-draw'
-  | 'toggle-grid'
-  | 'mode-change'
-  | 'direction-change'
-  | 'edit-chr'
-  | 'set-chr'
-  | 'load-chr'    // EDIT CHR.機能（ROMCG/RAMCGからロード）
-  | 'rotation'    // ROTATION機能
-  | 'transfer'    // TRANSFER機能
-  | 'clear'       // CLR機能（編集領域クリア）
-  | 'color-change' // COLOR CHANGE機能
-  | 'toggle-input-mode' // キーボード/マウスモード切り替え
-  | 'mouse-draw'  // マウスで描画
-  | 'file-save'   // ファイル保存
-  | 'file-load'   // ファイル読み込み
-  | 'toggle-width' // WIDTH 40/80切り替え
-  | 'load-font'   // フォント読み込み（隠し機能）
-  | 'home'
-  | 'cancel';
-
-/** 入力モード（キーボード/マウス） */
-export type InputDeviceMode = 'keyboard' | 'mouse';
-
-/** ファイルフォーマット */
-export type FileFormat = 'image' | 'bin' | 'bin3' | 'bas';
-
-/** 減色モード */
-export type ColorReduceMode = 'none' | 'reduce' | 'dither' | 'edfs' | 'retro';
-
-/** ROTATIONの種類 */
-export type RotationType =
-  | 'right'    // 0: 右（左に移動）
-  | 'left'     // 1: 左（右に移動）
-  | 'up'       // 2: 上に移動
-  | 'down'     // 3: 下に移動
-  | 'rot90'    // 4: 90度反時計回り
-  | 'rot180'   // 5: 180度回転
-  | 'flipH'    // 6: 上下フリップ
-  | 'flipV';   // 7: 左右フリップ
-
-/** BAS保存形式 */
-export type BasSaveFormat = 'asc' | 'bin';
-
-/** 入力イベントデータ */
-export interface InputEvent {
-  type: InputEventType;
-  data?: {
-    direction?: Direction;
-    color?: X1Color;
-    charCode?: number;
-    x?: number;
-    y?: number;
-    fast?: boolean;  // 高速移動（Shift+矢印）
-    source?: 'rom' | 'ram';  // EDIT CHR.用（ROMCG/RAMCG）
-    rotationType?: RotationType;  // ROTATION用
-    transfer?: { start: number; end: number; target: number };  // TRANSFER用
-    file?: { format: FileFormat; start: number; end: number; basLoadMode?: 'start' | 'original'; reduceMode?: ColorReduceMode; basFormat?: BasSaveFormat };  // ファイル保存/読み込み用
-    colorMap?: number[];  // COLOR CHANGE用（8要素の配列、各色の変換先）
-    mousePos?: { dotX: number; dotY: number };  // マウス描画用（ドット座標）
-  };
-}
-
-export type InputEventCallback = (event: InputEvent) => void;
+// 型の再エクスポート（既存コードとの互換性のため）
+export type {
+  InputMode,
+  InputDeviceMode,
+  FileFormat,
+  ColorReduceMode,
+  RotationType,
+  BasSaveFormat,
+  InputEvent,
+  InputEventCallback
+};
 
 /**
  * 統合入力ハンドラクラス
