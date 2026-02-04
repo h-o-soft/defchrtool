@@ -9,8 +9,7 @@ import { EditorRenderer } from './renderer/EditorRenderer';
 import { DefinitionRenderer } from './renderer/DefinitionRenderer';
 import { ScreenLayout } from './renderer/ScreenLayout';
 import { PCGData } from './core/PCGData';
-import { InputHandler, InputEvent, RotationType, FileFormat, InputDeviceMode, ColorReduceMode, BasSaveFormat } from './input/InputHandler';
-import { reduceColors, isExactX1Colors } from './core/ColorReducer';
+import { InputHandler, InputEvent, RotationType, InputDeviceMode, ColorReduceMode, BasSaveFormat, FileFormat } from './input/InputHandler';
 import {
   X1_COLORS,
   EditMode,
@@ -18,14 +17,11 @@ import {
   EditorState,
   X1Color
 } from './core/types';
-
-/** ローカルストレージのキー */
-const STORAGE_KEYS = {
-  PCG_DATA: 'defchr-pcgdata',
-  EDIT_BUFFER: 'defchr-editbuffer',
-  EDITOR_STATE: 'defchr-state',
-  FONT_DATA: 'defchr-fontdata'
-} as const;
+import { STATUS_MESSAGE_DURATION } from './core/constants';
+import { BinFormat, BasFormat, ImageFormat } from './io';
+import { LocalStorageService } from './storage';
+import { EditBufferTransform } from './core/EditBufferTransform';
+import { getEditArea, getCursorCharPos } from './core/EditAreaCalculator';
 
 class DEFCHRApp {
   private canvasManager: CanvasManager;
@@ -36,6 +32,7 @@ class DEFCHRApp {
   private pcgData: PCGData;
   private editBuffer: PCGData;  // 編集エリア専用バッファ
   private inputHandler: InputHandler;
+  private storageService: LocalStorageService;
 
   /** エディタの状態 */
   private editorState: EditorState;
@@ -46,9 +43,6 @@ class DEFCHRApp {
   /** ステータスメッセージ（一時表示用） */
   private statusMessage: string = '';
   private statusMessageTimeout: number | null = null;
-
-  /** 自動保存用のデバウンスタイマー */
-  private saveTimeout: number | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvasManager = new CanvasManager(canvas);
@@ -63,6 +57,7 @@ class DEFCHRApp {
     this.editorRenderer = new EditorRenderer(this.canvasManager, this.editBuffer, this.x1Renderer);  // 編集バッファを使用
     this.definitionRenderer = new DefinitionRenderer(this.canvasManager, this.pcgData);
     this.inputHandler = new InputHandler();
+    this.storageService = new LocalStorageService();
 
     // 初期状態（EDIT MODEはデフォルトでALL）
     this.editorState = {
@@ -182,16 +177,16 @@ class DEFCHRApp {
   }
 
   /**
-   * 入力イベント処理
+   * 入力イベント処理（Discriminated Union型でタイプセーフ）
    */
   private handleInput(event: InputEvent): void {
     switch (event.type) {
       case 'cursor-move':
-        this.handleCursorMove(event.data!.direction!, event.data!.fast || false);
+        this.handleCursorMove(event.data.direction, event.data.fast);
         break;
 
       case 'draw-dot':
-        this.handleDrawDot(event.data!.color!);
+        this.handleDrawDot(event.data.color);
         break;
 
       case 'toggle-draw':
@@ -215,7 +210,7 @@ class DEFCHRApp {
         break;
 
       case 'color-select':
-        this.handleColorSelect(event.data!.color!);
+        this.handleColorSelect(event.data.color);
         break;
 
       case 'toggle-input-mode':
@@ -231,27 +226,27 @@ class DEFCHRApp {
         break;
 
       case 'mouse-draw':
-        this.handleMouseDraw(event.data!.mousePos!.dotX, event.data!.mousePos!.dotY);
+        this.handleMouseDraw(event.data.mousePos.dotX, event.data.mousePos.dotY);
         break;
 
       case 'edit-chr':
-        this.handleEditChr(event.data!.charCode!);
+        this.handleEditChr(event.data.charCode);
         break;
 
       case 'set-chr':
-        this.handleSetChr(event.data!.charCode!);
+        this.handleSetChr(event.data.charCode);
         break;
 
       case 'load-chr':
-        this.handleLoadChr(event.data!.source!, event.data!.charCode!);
+        this.handleLoadChr(event.data.source, event.data.charCode);
         break;
 
       case 'rotation':
-        this.handleRotation(event.data!.rotationType!);
+        this.handleRotation(event.data.rotationType);
         break;
 
       case 'transfer':
-        this.handleTransfer(event.data!.transfer!);
+        this.handleTransfer(event.data.transfer);
         break;
 
       case 'clear':
@@ -259,19 +254,19 @@ class DEFCHRApp {
         break;
 
       case 'color-change':
-        this.handleColorChange(event.data!.colorMap!);
+        this.handleColorChange(event.data.colorMap);
         break;
 
       case 'file-save':
-        this.handleFileSave(event.data!.file!.format, event.data!.file!.start, event.data!.file!.end, event.data!.file!.basFormat);
+        this.handleFileSave(event.data.file.format, event.data.file.start, event.data.file.end, event.data.file.basFormat);
         break;
 
       case 'file-load':
         this.handleFileLoad(
-          event.data!.file!.format,
-          event.data!.file!.start,
-          event.data!.file!.basLoadMode,
-          event.data!.file!.reduceMode
+          event.data.file.format,
+          event.data.file.start,
+          event.data.file.basLoadMode,
+          event.data.file.reduceMode
         );
         break;
 
@@ -601,209 +596,22 @@ class DEFCHRApp {
    */
   private handleRotation(rotationType: RotationType): void {
     const cursorPos = this.editorState.cursorPosition;
-    const charX = Math.floor(cursorPos.x / 8);
-    const charY = Math.floor(cursorPos.y / 8);
 
-    // 編集モードに応じた対象エリアを取得
-    const { startX, startY, width, height, charCodes } = this.getEditArea(charX, charY);
+    const success = EditBufferTransform.apply(
+      this.editBuffer,
+      this.editorState.editMode,
+      cursorPos.x,
+      cursorPos.y,
+      rotationType
+    );
 
-    // 90度/180度回転はタテ2Chr.やヨコ2Chr.では無効
-    if ((rotationType === 'rot90' || rotationType === 'rot180') &&
-        (this.editorState.editMode === EditMode.VERTICAL ||
-         this.editorState.editMode === EditMode.HORIZONTAL)) {
+    if (!success) {
       this.showStatusMessage('Invalid for this mode');
       return;
     }
 
-    // 対象エリアのピクセルデータを取得
-    const pixels = this.getAreaPixels(startX, startY, width, height, charCodes);
-
-    // 変換を適用
-    const transformed = this.applyTransformation(pixels, width, height, rotationType);
-
-    // 結果を書き戻す
-    this.setAreaPixels(startX, startY, width, height, charCodes, transformed);
-
-    const rotationNames: Record<RotationType, string> = {
-      'right': 'Move Right',
-      'left': 'Move Left',
-      'up': 'Move Up',
-      'down': 'Move Down',
-      'rot90': 'Rotate 90°',
-      'rot180': 'Rotate 180°',
-      'flipH': 'Flip H',
-      'flipV': 'Flip V'
-    };
-    this.showStatusMessage(rotationNames[rotationType]);
+    this.showStatusMessage(EditBufferTransform.getTransformName(rotationType));
     this.scheduleSave();
-  }
-
-  /**
-   * 編集モードとカーソル位置から対象エリアを取得
-   */
-  private getEditArea(charX: number, charY: number): {
-    startX: number; startY: number; width: number; height: number;
-    charCodes: number[];
-  } {
-    switch (this.editorState.editMode) {
-      case EditMode.SEPARATE:
-        // 1文字のみ
-        return {
-          startX: charX * 8, startY: charY * 8, width: 8, height: 8,
-          charCodes: [charX + charY * 16]
-        };
-      case EditMode.VERTICAL:
-        // 縦2文字
-        return {
-          startX: charX * 8, startY: 0, width: 8, height: 16,
-          charCodes: [charX, charX + 16]
-        };
-      case EditMode.HORIZONTAL:
-        // 横2文字
-        return {
-          startX: 0, startY: charY * 8, width: 16, height: 8,
-          charCodes: [charY * 16, charY * 16 + 1]
-        };
-      case EditMode.ALL:
-      default:
-        // 4文字すべて
-        return {
-          startX: 0, startY: 0, width: 16, height: 16,
-          charCodes: [0, 1, 16, 17]
-        };
-    }
-  }
-
-  /**
-   * 指定エリアのピクセルを取得
-   */
-  private getAreaPixels(
-    _startX: number, _startY: number, width: number, height: number,
-    charCodes: number[]
-  ): X1Color[][] {
-    const pixels: X1Color[][] = [];
-    for (let y = 0; y < height; y++) {
-      pixels[y] = [];
-      for (let x = 0; x < width; x++) {
-        const charIdx = Math.floor(x / 8) + Math.floor(y / 8) * (width > 8 ? 2 : 1);
-        const charCode = charCodes[charIdx] || charCodes[0];
-        const localX = x % 8;
-        const localY = y % 8;
-        pixels[y][x] = this.editBuffer.getPixel(charCode, localX, localY);
-      }
-    }
-    return pixels;
-  }
-
-  /**
-   * ピクセルを指定エリアに書き戻す
-   */
-  private setAreaPixels(
-    _startX: number, _startY: number, width: number, height: number,
-    charCodes: number[], pixels: X1Color[][]
-  ): void {
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const charIdx = Math.floor(x / 8) + Math.floor(y / 8) * (width > 8 ? 2 : 1);
-        const charCode = charCodes[charIdx] || charCodes[0];
-        const localX = x % 8;
-        const localY = y % 8;
-        this.editBuffer.setPixel(charCode, localX, localY, pixels[y][x]);
-      }
-    }
-  }
-
-  /**
-   * 変換を適用
-   */
-  private applyTransformation(
-    pixels: X1Color[][], width: number, height: number, type: RotationType
-  ): X1Color[][] {
-    const result: X1Color[][] = [];
-
-    switch (type) {
-      case 'right':
-        // 左に移動（左端が右端に折り返し）
-        for (let y = 0; y < height; y++) {
-          result[y] = [];
-          for (let x = 0; x < width; x++) {
-            result[y][x] = pixels[y][(x + 1) % width];
-          }
-        }
-        break;
-
-      case 'left':
-        // 右に移動（右端が左端に折り返し）
-        for (let y = 0; y < height; y++) {
-          result[y] = [];
-          for (let x = 0; x < width; x++) {
-            result[y][x] = pixels[y][(x - 1 + width) % width];
-          }
-        }
-        break;
-
-      case 'up':
-        // 上に移動（上端が下端に折り返し）
-        for (let y = 0; y < height; y++) {
-          result[y] = [];
-          for (let x = 0; x < width; x++) {
-            result[y][x] = pixels[(y + 1) % height][x];
-          }
-        }
-        break;
-
-      case 'down':
-        // 下に移動（下端が上端に折り返し）
-        for (let y = 0; y < height; y++) {
-          result[y] = [];
-          for (let x = 0; x < width; x++) {
-            result[y][x] = pixels[(y - 1 + height) % height][x];
-          }
-        }
-        break;
-
-      case 'rot90':
-        // 90度反時計回り: (x,y) -> (y, width-1-x)
-        for (let y = 0; y < width; y++) {
-          result[y] = [];
-          for (let x = 0; x < height; x++) {
-            result[y][x] = pixels[x][width - 1 - y];
-          }
-        }
-        break;
-
-      case 'rot180':
-        // 180度: (x,y) -> (width-1-x, height-1-y)
-        for (let y = 0; y < height; y++) {
-          result[y] = [];
-          for (let x = 0; x < width; x++) {
-            result[y][x] = pixels[height - 1 - y][width - 1 - x];
-          }
-        }
-        break;
-
-      case 'flipH':
-        // 上下フリップ: (x,y) -> (x, height-1-y)
-        for (let y = 0; y < height; y++) {
-          result[y] = [];
-          for (let x = 0; x < width; x++) {
-            result[y][x] = pixels[height - 1 - y][x];
-          }
-        }
-        break;
-
-      case 'flipV':
-        // 左右フリップ: (x,y) -> (width-1-x, y)
-        for (let y = 0; y < height; y++) {
-          result[y] = [];
-          for (let x = 0; x < width; x++) {
-            result[y][x] = pixels[y][width - 1 - x];
-          }
-        }
-        break;
-    }
-
-    return result;
   }
 
   /**
@@ -812,11 +620,10 @@ class DEFCHRApp {
    */
   private handleClear(): void {
     const cursorPos = this.editorState.cursorPosition;
-    const charX = Math.floor(cursorPos.x / 8);
-    const charY = Math.floor(cursorPos.y / 8);
+    const { charX, charY } = getCursorCharPos(cursorPos.x, cursorPos.y);
 
     // 編集モードに応じた対象エリアを取得
-    const { charCodes } = this.getEditArea(charX, charY);
+    const { charCodes } = getEditArea(this.editorState.editMode, charX, charY);
 
     // 対象エリアのすべてのピクセルを黒でクリア
     for (const charCode of charCodes) {
@@ -838,11 +645,10 @@ class DEFCHRApp {
    */
   private handleColorChange(colorMap: number[]): void {
     const cursorPos = this.editorState.cursorPosition;
-    const charX = Math.floor(cursorPos.x / 8);
-    const charY = Math.floor(cursorPos.y / 8);
+    const { charX, charY } = getCursorCharPos(cursorPos.x, cursorPos.y);
 
     // 編集モードに応じた対象エリアを取得
-    const { charCodes } = this.getEditArea(charX, charY);
+    const { charCodes } = getEditArea(this.editorState.editMode, charX, charY);
 
     // 対象エリアの各ピクセルの色を変換
     for (const charCode of charCodes) {
@@ -890,24 +696,43 @@ class DEFCHRApp {
   /**
    * ファイル保存処理
    */
-  private handleFileSave(format: FileFormat, start: number, end: number, basFormat?: BasSaveFormat): void {
-    switch (format) {
-      case 'image':
-        this.savePng();
-        break;
-      case 'bin':
-        this.saveBin(start, end, false);
-        break;
-      case 'bin3':
-        this.saveBin(start, end, true);
-        break;
-      case 'bas':
-        if (basFormat === 'bin') {
-          this.saveBasBinary(start, end);
-        } else {
-          this.saveBasAscii(start, end);
-        }
-        break;
+  private async handleFileSave(format: FileFormat, start: number, end: number, basFormat?: BasSaveFormat): Promise<void> {
+    try {
+      let blob: Blob;
+      let fileName: string;
+
+      switch (format) {
+        case 'image':
+          blob = await ImageFormat.savePng(this.pcgData);
+          fileName = ImageFormat.getDefaultFileName();
+          break;
+        case 'bin':
+          blob = BinFormat.save(this.pcgData, start, end, false);
+          fileName = BinFormat.getDefaultFileName(false);
+          break;
+        case 'bin3':
+          blob = BinFormat.save(this.pcgData, start, end, true);
+          fileName = BinFormat.getDefaultFileName(true);
+          break;
+        case 'bas':
+          if (basFormat === 'bin') {
+            blob = BasFormat.saveBinary(this.pcgData, start, end);
+            fileName = BasFormat.getDefaultFileName(true);
+          } else {
+            blob = BasFormat.saveAscii(this.pcgData, start, end);
+            fileName = BasFormat.getDefaultFileName(false);
+          }
+          break;
+        default:
+          return;
+      }
+
+      // ダウンロード
+      this.downloadBlob(blob, fileName);
+      this.showStatusMessage(`Saved: ${fileName}`);
+    } catch (e) {
+      console.error('[DEFCHRApp] File save error:', e);
+      this.showStatusMessage(e instanceof Error ? e.message : 'Save failed');
     }
   }
 
@@ -915,663 +740,75 @@ class DEFCHRApp {
    * ファイル読み込み処理
    */
   private handleFileLoad(format: FileFormat, start: number, basLoadMode?: 'start' | 'original', reduceMode?: ColorReduceMode): void {
-    switch (format) {
-      case 'image':
-        this.loadImage(reduceMode || 'none');
-        break;
-      case 'bin':
-        this.loadBin(start, false);
-        break;
-      case 'bin3':
-        this.loadBin(start, true);
-        break;
-      case 'bas':
-        this.loadBas(start, basLoadMode || 'start');
-        break;
-    }
-  }
-
-  /**
-   * PNG形式で保存（全256文字を128x128画像として）
-   */
-  private savePng(): void {
-    // 128x128のオフスクリーンキャンバスを作成
-    const canvas = document.createElement('canvas');
-    canvas.width = 128;
-    canvas.height = 128;
-    const ctx = canvas.getContext('2d')!;
-
-    // 黒で塗りつぶし
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, 128, 128);
-
-    // X1の8色パレット
-    const palette: [number, number, number][] = [
-      [0, 0, 0],       // 0: 黒
-      [0, 0, 255],     // 1: 青
-      [255, 0, 0],     // 2: 赤
-      [255, 0, 255],   // 3: マゼンタ
-      [0, 255, 0],     // 4: 緑
-      [0, 255, 255],   // 5: シアン
-      [255, 255, 0],   // 6: 黄
-      [255, 255, 255], // 7: 白
-    ];
-
-    // 256文字を描画
-    for (let charCode = 0; charCode < 256; charCode++) {
-      const charX = (charCode % 16) * 8;
-      const charY = Math.floor(charCode / 16) * 8;
-
-      for (let py = 0; py < 8; py++) {
-        for (let px = 0; px < 8; px++) {
-          const color = this.pcgData.getPixel(charCode, px, py);
-          if (color !== 0) {
-            const [r, g, b] = palette[color];
-            ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-            ctx.fillRect(charX + px, charY + py, 1, 1);
-          }
-        }
-      }
-    }
-
-    // PNGとしてダウンロード
-    canvas.toBlob((blob) => {
-      if (blob) {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'pcg.png';
-        a.click();
-        URL.revokeObjectURL(url);
-        this.showStatusMessage('Saved: pcg.png');
-      }
-    }, 'image/png');
-  }
-
-  /**
-   * 画像形式で読み込み（PNG, JPEG等）
-   * @param reduceMode 減色モード
-   */
-  private loadImage(reduceMode: ColorReduceMode): void {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'image/png,image/jpeg,image/gif,image/webp';
+
+    switch (format) {
+      case 'image':
+        input.accept = 'image/png,image/jpeg,image/gif,image/webp';
+        break;
+      case 'bin':
+      case 'bin3':
+        input.accept = '.bin';
+        break;
+      case 'bas':
+        input.accept = '.bas,.asc,.txt,text/plain';
+        break;
+    }
 
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
 
-      const img = new Image();
-      img.onload = () => {
-        // 128x128以外のサイズは警告（ただし処理は続行）
-        if (img.width !== 128 || img.height !== 128) {
-          console.warn(`Image size is ${img.width}x${img.height}, expected 128x128`);
-        }
+      try {
+        let loadCount: number;
 
-        // 画像をキャンバスに描画してピクセルデータを取得
-        const canvas = document.createElement('canvas');
-        canvas.width = 128;
-        canvas.height = 128;
-        const ctx = canvas.getContext('2d')!;
-        ctx.drawImage(img, 0, 0, 128, 128);
-        const imageData = ctx.getImageData(0, 0, 128, 128);
-
-        // 減色モードに応じて処理
-        let colorData: X1Color[][];
-        if (reduceMode === 'none' && isExactX1Colors(imageData)) {
-          // X1の8色のみで構成されている場合はそのまま変換
-          colorData = reduceColors(imageData, 'reduce');
-        } else if (reduceMode === 'none') {
-          // 8色以外が含まれているが'none'が指定された場合は'reduce'にフォールバック
-          console.log('[DEFCHRApp] Non-X1 colors detected, using reduce mode');
-          colorData = reduceColors(imageData, 'reduce');
-        } else {
-          colorData = reduceColors(imageData, reduceMode);
-        }
-
-        // 256文字を読み込み
-        for (let charCode = 0; charCode < 256; charCode++) {
-          const charX = (charCode % 16) * 8;
-          const charY = Math.floor(charCode / 16) * 8;
-
-          for (let py = 0; py < 8; py++) {
-            for (let px = 0; px < 8; px++) {
-              const color = colorData[charY + py][charX + px];
-              this.pcgData.setPixel(charCode, px, py, color);
-            }
+        switch (format) {
+          case 'image':
+            loadCount = await ImageFormat.loadImage(file, this.pcgData, reduceMode || 'none');
+            this.showStatusMessage(`Loaded: ${file.name} (${reduceMode || 'none'})`);
+            break;
+          case 'bin':
+          case 'bin3': {
+            const buffer = await file.arrayBuffer();
+            const data = new Uint8Array(buffer);
+            loadCount = BinFormat.load(data, this.pcgData, start, format === 'bin3');
+            this.showStatusMessage(`Loaded: ${loadCount} chars from ${file.name}`);
+            break;
           }
+          case 'bas': {
+            const buffer = await file.arrayBuffer();
+            const data = new Uint8Array(buffer);
+            loadCount = BasFormat.load(data, this.pcgData, start, basLoadMode || 'start');
+            this.showStatusMessage(`Loaded: ${loadCount} chars from ${file.name}`);
+            break;
+          }
+          default:
+            return;
         }
 
         // 定義エリアを更新
         this.definitionRenderer.render();
-        this.showStatusMessage(`Loaded: ${file.name} (${reduceMode})`);
         this.scheduleSave();
-      };
-
-      img.src = URL.createObjectURL(file);
+      } catch (e) {
+        console.error('[DEFCHRApp] File load error:', e);
+        this.showStatusMessage(e instanceof Error ? e.message : 'Load failed');
+      }
     };
 
     input.click();
   }
 
   /**
-   * BIN形式で保存
-   * @param start 開始文字コード
-   * @param end 終了文字コード
-   * @param x3mode 三倍速定義モード
+   * Blobをダウンロード
    */
-  private saveBin(start: number, end: number, x3mode: boolean): void {
-    const count = end - start + 1;
-    if (count <= 0) {
-      this.showStatusMessage('Invalid range');
-      return;
-    }
-
-    let data: Uint8Array;
-
-    if (x3mode) {
-      // 三倍速定義モード: B0,R0,G0, B1,R1,G1, ... の形式（行ごとにインターリーブ）
-      // 1文字 = 8行 x 3プレーン = 24バイト
-      data = new Uint8Array(count * 24);
-      let offset = 0;
-      for (let i = 0; i < count; i++) {
-        const charData = this.pcgData.getCharacter(start + i);
-        // 行ごとにB, R, Gをインターリーブ
-        for (let row = 0; row < 8; row++) {
-          data[offset++] = charData[row];      // B
-          data[offset++] = charData[8 + row];  // R
-          data[offset++] = charData[16 + row]; // G
-        }
-      }
-    } else {
-      // 通常モード: 各文字のデータをそのまま連結（B[8], R[8], G[8]）
-      data = new Uint8Array(count * 24);
-      let offset = 0;
-      for (let i = 0; i < count; i++) {
-        const charData = this.pcgData.getCharacter(start + i);
-        data.set(charData, offset);
-        offset += 24;
-      }
-    }
-
-    // BINとしてダウンロード
-    const blob = new Blob([data.buffer as ArrayBuffer], { type: 'application/octet-stream' });
+  private downloadBlob(blob: Blob, fileName: string): void {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = x3mode ? 'pcg_x3.bin' : 'pcg.bin';
+    a.download = fileName;
     a.click();
     URL.revokeObjectURL(url);
-    this.showStatusMessage(`Saved: ${a.download}`);
-  }
-
-  /**
-   * BIN形式で読み込み
-   * @param start 開始文字コード
-   * @param x3mode 三倍速定義モード
-   */
-  private loadBin(start: number, x3mode: boolean): void {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.bin';
-
-    input.onchange = async () => {
-      const file = input.files?.[0];
-      if (!file) return;
-
-      const buffer = await file.arrayBuffer();
-      const data = new Uint8Array(buffer);
-
-      // 文字数を計算
-      const bytesPerChar = 24;
-      const charCount = Math.floor(data.length / bytesPerChar);
-
-      if (charCount === 0) {
-        this.showStatusMessage('File too small');
-        return;
-      }
-
-      // 範囲チェック
-      if (start + charCount > 256) {
-        this.showStatusMessage('Data exceeds 256 chars');
-        return;
-      }
-
-      // 読み込み
-      for (let i = 0; i < charCount; i++) {
-        const charCode = start + i;
-        const charData = new Uint8Array(24);
-
-        if (x3mode) {
-          // 三倍速定義モード: 行ごとにB, R, Gがインターリーブされている
-          const srcOffset = i * 24;
-          for (let row = 0; row < 8; row++) {
-            charData[row] = data[srcOffset + row * 3];      // B
-            charData[8 + row] = data[srcOffset + row * 3 + 1];  // R
-            charData[16 + row] = data[srcOffset + row * 3 + 2]; // G
-          }
-        } else {
-          // 通常モード: そのままコピー
-          charData.set(data.slice(i * 24, (i + 1) * 24));
-        }
-
-        this.pcgData.setCharacter(charCode, charData);
-      }
-
-      // 定義エリアを更新
-      this.definitionRenderer.render();
-      this.showStatusMessage(`Loaded: ${charCount} chars from ${file.name}`);
-      this.scheduleSave();
-    };
-
-    input.click();
-  }
-
-  /**
-   * BAS形式で保存（BASIC ASCII形式）
-   * @param start 開始文字コード
-   * @param end 終了文字コード
-   */
-  private saveBasAscii(start: number, end: number): void {
-    const count = end - start + 1;
-    if (count <= 0) {
-      this.showStatusMessage('Invalid range');
-      return;
-    }
-
-    // 行番号の開始（仕様書より60960から）
-    const lineStart = 60960;
-    const lines: string[] = [];
-
-    for (let i = 0; i < count; i++) {
-      const charCode = start + i;
-      const charData = this.pcgData.getCharacter(charCode);
-
-      // B[8], R[8], G[8] を16進文字列に変換
-      let hexStr = '';
-      for (let j = 0; j < 24; j++) {
-        hexStr += charData[j].toString(16).toUpperCase().padStart(2, '0');
-      }
-
-      // DEFCHR$(code)=HEXCHR$("...")
-      const lineNum = lineStart + i * 10;
-      lines.push(`${lineNum}DEFCHR$(${charCode})=HEXCHR$("${hexStr}")`);
-    }
-
-    // ASCファイルとしてダウンロード（X1 BASICはCRのみ）
-    const content = lines.join('\r') + '\r';
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'pcg.asc';
-    a.click();
-    URL.revokeObjectURL(url);
-    this.showStatusMessage('Saved: pcg.asc');
-  }
-
-  /**
-   * BAS形式で保存（X1 BASIC バイナリ形式）
-   * @param start 開始文字コード
-   * @param end 終了文字コード
-   */
-  private saveBasBinary(start: number, end: number): void {
-    const count = end - start + 1;
-    if (count <= 0) {
-      this.showStatusMessage('Invalid range');
-      return;
-    }
-
-    // X1 BASICトークン定義
-    const TOKEN_DEFCHR = 0xB2;
-    const TOKEN_DOLLAR = 0xFF;      // $ (文字列関数拡張プレフィックス)
-    const TOKEN_FUNC_CALL = 0xA0;   // 関数呼び出し (DEFCHR$の後)
-    const TOKEN_LPAREN = 0x28;      // (
-    const TOKEN_RPAREN = 0x29;      // )
-    const TOKEN_EQUAL = 0xF4;       // =
-    const TOKEN_HEXCHR = 0xBF;      // HEXCHR (0xFFの後)
-    const TOKEN_QUOTE = 0x22;       // "
-    const TOKEN_INT16 = 0x12;       // 16ビット整数プレフィックス
-    const TOKEN_LINE_END = 0x00;    // 行終端
-    const PROGRAM_END = [0x00, 0x00]; // プログラム終端
-
-    // 1行のデータを生成する関数
-    const generateLine = (lineNum: number, charCode: number, hexStr: string): number[] => {
-      const lineData: number[] = [];
-
-      // 行番号 (リトルエンディアン 2バイト)
-      lineData.push(lineNum & 0xFF);
-      lineData.push((lineNum >> 8) & 0xFF);
-
-      // DEFCHR$ トークン: b2 ff a0
-      lineData.push(TOKEN_DEFCHR);
-      lineData.push(TOKEN_DOLLAR);
-      lineData.push(TOKEN_FUNC_CALL);
-
-      // (
-      lineData.push(TOKEN_LPAREN);
-
-      // 文字コード (16ビット整数): 12 xx xx
-      lineData.push(TOKEN_INT16);
-      lineData.push(charCode & 0xFF);
-      lineData.push((charCode >> 8) & 0xFF);
-
-      // )
-      lineData.push(TOKEN_RPAREN);
-
-      // =
-      lineData.push(TOKEN_EQUAL);
-
-      // HEXCHR$: ff bf
-      lineData.push(TOKEN_DOLLAR);
-      lineData.push(TOKEN_HEXCHR);
-
-      // (
-      lineData.push(TOKEN_LPAREN);
-
-      // "文字列"
-      lineData.push(TOKEN_QUOTE);
-      for (let i = 0; i < hexStr.length; i++) {
-        lineData.push(hexStr.charCodeAt(i));
-      }
-      lineData.push(TOKEN_QUOTE);
-
-      // )
-      lineData.push(TOKEN_RPAREN);
-
-      // 行終端
-      lineData.push(TOKEN_LINE_END);
-
-      return lineData;
-    };
-
-    // 全行のデータを生成
-    const allLines: number[][] = [];
-    const lineStart = 60960;
-
-    for (let i = 0; i < count; i++) {
-      const charCode = start + i;
-      const charData = this.pcgData.getCharacter(charCode);
-
-      // B[8], R[8], G[8] を16進文字列に変換
-      let hexStr = '';
-      for (let j = 0; j < 24; j++) {
-        hexStr += charData[j].toString(16).toUpperCase().padStart(2, '0');
-      }
-
-      const lineNum = lineStart + i * 10;
-      allLines.push(generateLine(lineNum, charCode, hexStr));
-    }
-
-    // リンクポインタを計算して最終データを生成
-    // リンクポインタは行サイズ（次の行までの距離）を示す
-    // X1 BASICはロード時にメモリアドレスとして再計算する
-    const finalData: number[] = [];
-
-    for (let i = 0; i < allLines.length; i++) {
-      const lineData = allLines[i];
-      // この行のサイズ = リンクポインタ(2) + 行データ
-      const lineSize = 2 + lineData.length;
-
-      // リンクポインタを追加（リトルエンディアン）
-      // リンクポインタは行サイズ（次の行までの距離）
-      finalData.push(lineSize & 0xFF);
-      finalData.push((lineSize >> 8) & 0xFF);
-
-      // 行データを追加
-      finalData.push(...lineData);
-    }
-
-    // プログラム終端を追加
-    finalData.push(...PROGRAM_END);
-
-    // BASファイルとしてダウンロード
-    const data = new Uint8Array(finalData);
-    const blob = new Blob([data.buffer as ArrayBuffer], { type: 'application/octet-stream' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'pcg.bas';
-    a.click();
-    URL.revokeObjectURL(url);
-    this.showStatusMessage('Saved: pcg.bas');
-  }
-
-  /**
-   * BAS形式で読み込み（ASCII/バイナリ両対応）
-   * @param start 開始文字コード（'start'モード時のみ使用）
-   * @param mode 'start': STARTから連続読み込み, 'original': ファイル内のコードをそのまま使用
-   */
-  private loadBas(start: number, mode: 'start' | 'original'): void {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.bas,.asc,.txt,text/plain';
-
-    input.onchange = async () => {
-      const file = input.files?.[0];
-      if (!file) return;
-
-      const buffer = await file.arrayBuffer();
-      const data = new Uint8Array(buffer);
-
-      // バイナリ形式かASCII形式かを判定
-      // バイナリ形式は行終端に0x00を含む
-      const isBinary = data.includes(0x00);
-
-      let loadCount = 0;
-
-      if (isBinary) {
-        loadCount = this.loadBasBinary(data, start, mode);
-      } else {
-        const text = new TextDecoder().decode(data);
-        loadCount = this.loadBasAsciiText(text, start, mode);
-      }
-
-      // 定義エリアを更新
-      this.definitionRenderer.render();
-      this.showStatusMessage(`Loaded: ${loadCount} chars from ${file.name}`);
-      this.scheduleSave();
-    };
-
-    input.click();
-  }
-
-  /**
-   * BAS ASCII形式のテキストを読み込み
-   */
-  private loadBasAsciiText(text: string, start: number, mode: 'start' | 'original'): number {
-    // すべての改行コードに対応（CR, LF, CRLF）
-    const lines = text.split(/\r\n|\r|\n/);
-
-    // DEFCHR$パターン: 行番号 DEFCHR$(コード)=HEXCHR$("16進文字列")
-    const defchrPattern = /DEFCHR\$\s*\(\s*(\d+)\s*\)\s*=\s*HEXCHR\$\s*\(\s*"([0-9A-Fa-f]+)"\s*\)/i;
-
-    let loadCount = 0;
-    let currentCode = start;
-
-    for (const line of lines) {
-      const match = line.match(defchrPattern);
-      if (!match) continue;
-
-      const originalCode = parseInt(match[1], 10);
-      const hexStr = match[2];
-
-      // 48文字（24バイト x 2）でない場合はスキップ
-      if (hexStr.length !== 48) {
-        console.warn(`Invalid hex length for code ${originalCode}: ${hexStr.length}`);
-        continue;
-      }
-
-      // 16進文字列をバイト配列に変換
-      const charData = new Uint8Array(24);
-      for (let i = 0; i < 24; i++) {
-        charData[i] = parseInt(hexStr.substr(i * 2, 2), 16);
-      }
-
-      // 書き込み先コードを決定
-      const targetCode = mode === 'original' ? originalCode : currentCode;
-
-      // 範囲チェック
-      if (targetCode < 0 || targetCode > 255) {
-        console.warn(`Code out of range: ${targetCode}`);
-        if (mode === 'start') currentCode++;
-        continue;
-      }
-
-      this.pcgData.setCharacter(targetCode, charData);
-      loadCount++;
-
-      if (mode === 'start') {
-        currentCode++;
-        if (currentCode > 255) break;
-      }
-    }
-
-    return loadCount;
-  }
-
-  /**
-   * BAS バイナリ形式を読み込み
-   * DEFCHR$行のみを処理し、他の命令は無視する
-   */
-  private loadBasBinary(data: Uint8Array, start: number, mode: 'start' | 'original'): number {
-    // X1 BASICトークン
-    const TOKEN_DEFCHR = 0xB2;
-    const TOKEN_DOLLAR = 0xFF;
-    const TOKEN_FUNC_CALL = 0xA0;
-
-    let loadCount = 0;
-    let currentCode = start;
-    let offset = 0;
-
-    // プログラム終端（0x00 0x00）まで処理
-    while (offset < data.length - 1) {
-      // リンクポインタを読む（終端チェック）
-      const linkLow = data[offset];
-      const linkHigh = data[offset + 1];
-      const linkPointer = linkLow | (linkHigh << 8);
-
-      // プログラム終端
-      if (linkPointer === 0x0000) {
-        break;
-      }
-
-      // 行の開始位置を保存
-      const lineStart = offset;
-
-      // 行番号をスキップ（リンクポインタ2B + 行番号2B = 4B）
-      offset += 4;
-
-      // 行終端はリンクポインタを使って計算（行終端の0x00を含む）
-      // リンクポインタは行サイズなので、lineStart + linkPointer - 1 が行終端0x00の位置
-      const lineEnd = lineStart + linkPointer - 1;
-
-      // DEFCHR$行かチェック（b2 ff a0 で始まる）
-      if (offset + 3 <= lineEnd &&
-          data[offset] === TOKEN_DEFCHR &&
-          data[offset + 1] === TOKEN_DOLLAR &&
-          data[offset + 2] === TOKEN_FUNC_CALL) {
-
-        // DEFCHR$行をパース
-        const result = this.parseDefchrBinaryLine(data, offset, lineEnd);
-
-        if (result) {
-          const { charCode: originalCode, hexStr } = result;
-
-          // 書き込み先コードを決定
-          const targetCode = mode === 'original' ? originalCode : currentCode;
-
-          // 範囲チェック
-          if (targetCode >= 0 && targetCode <= 255) {
-            // 16進文字列をバイト配列に変換
-            const charData = new Uint8Array(24);
-            for (let i = 0; i < 24; i++) {
-              charData[i] = parseInt(hexStr.substr(i * 2, 2), 16);
-            }
-
-            this.pcgData.setCharacter(targetCode, charData);
-            loadCount++;
-
-            if (mode === 'start') {
-              currentCode++;
-              if (currentCode > 255) break;
-            }
-          }
-        }
-      }
-
-      // 次の行へ（リンクポインタを使用）
-      offset = lineStart + linkPointer;
-    }
-
-    return loadCount;
-  }
-
-  /**
-   * DEFCHR$バイナリ行をパース
-   * @returns { charCode, hexStr } または null
-   */
-  private parseDefchrBinaryLine(data: Uint8Array, offset: number, lineEnd: number): { charCode: number; hexStr: string } | null {
-    const TOKEN_INT16 = 0x12;
-    const TOKEN_QUOTE = 0x22;
-
-    // b2 ff a0 をスキップ（DEFCHR$）
-    offset += 3;
-
-    // ( (0x28) をスキップ
-    if (offset >= lineEnd || data[offset] !== 0x28) return null;
-    offset++;
-
-    // 文字コードを読む
-    let charCode: number;
-    if (data[offset] === TOKEN_INT16) {
-      // 16ビット整数: 12 xx xx
-      if (offset + 3 > lineEnd) return null;
-      charCode = data[offset + 1] | (data[offset + 2] << 8);
-      offset += 3;
-    } else if (data[offset] >= 0x02 && data[offset] <= 0x0A) {
-      // 小さい整数: 1-9 は値+1で格納
-      charCode = data[offset] - 1;
-      offset++;
-    } else {
-      return null;
-    }
-
-    // ) (0x29) をスキップ
-    if (offset >= lineEnd || data[offset] !== 0x29) return null;
-    offset++;
-
-    // = (0xF4) をスキップ
-    if (offset >= lineEnd || data[offset] !== 0xF4) return null;
-    offset++;
-
-    // HEXCHR$ (ff bf) をスキップ
-    if (offset + 2 > lineEnd || data[offset] !== 0xFF || data[offset + 1] !== 0xBF) return null;
-    offset += 2;
-
-    // ( (0x28) をスキップ
-    if (offset >= lineEnd || data[offset] !== 0x28) return null;
-    offset++;
-
-    // " (0x22) をスキップ
-    if (offset >= lineEnd || data[offset] !== TOKEN_QUOTE) return null;
-    offset++;
-
-    // 48文字のHEX文字列を読む
-    if (offset + 48 > lineEnd) return null;
-    let hexStr = '';
-    for (let i = 0; i < 48; i++) {
-      hexStr += String.fromCharCode(data[offset + i]);
-    }
-    offset += 48;
-
-    // " (0x22) を確認
-    if (offset >= lineEnd || data[offset] !== TOKEN_QUOTE) return null;
-
-    // HEX文字列の検証
-    if (!/^[0-9A-Fa-f]{48}$/.test(hexStr)) return null;
-
-    return { charCode, hexStr };
   }
 
   /**
@@ -1630,35 +867,20 @@ class DEFCHRApp {
   }
 
   /**
-   * 自動保存をスケジュール（デバウンス：500ms後に保存）
+   * 自動保存をスケジュール
    */
   private scheduleSave(): void {
-    if (this.saveTimeout !== null) {
-      clearTimeout(this.saveTimeout);
-    }
-    this.saveTimeout = window.setTimeout(() => {
-      this.saveToLocalStorage();
-      this.saveTimeout = null;
-    }, 500);
+    this.storageService.scheduleSave(this.createSaveState());
   }
 
   /**
-   * ローカルストレージにデータを保存
+   * 保存用の状態を作成
    */
-  private saveToLocalStorage(): void {
-    try {
-      // PCGデータをBase64エンコードして保存
-      const pcgDataArray = this.pcgData.getAllData();
-      const pcgDataBase64 = this.uint8ArrayToBase64(pcgDataArray);
-      localStorage.setItem(STORAGE_KEYS.PCG_DATA, pcgDataBase64);
-
-      // 編集バッファをBase64エンコードして保存
-      const editBufferArray = this.editBuffer.getAllData();
-      const editBufferBase64 = this.uint8ArrayToBase64(editBufferArray);
-      localStorage.setItem(STORAGE_KEYS.EDIT_BUFFER, editBufferBase64);
-
-      // エディタ状態をJSONで保存
-      const stateToSave = {
+  private createSaveState() {
+    return {
+      pcgData: this.pcgData.getAllData(),
+      editBuffer: this.editBuffer.getAllData(),
+      editorState: {
         editMode: this.editorState.editMode,
         cursorPosition: this.editorState.cursorPosition,
         currentColor: this.editorState.currentColor,
@@ -1666,20 +888,9 @@ class DEFCHRApp {
         currentCharCode: this.editorState.currentCharCode,
         editChrCode: this.editorState.editChrCode,
         gridVisible: this.gridVisible
-      };
-      localStorage.setItem(STORAGE_KEYS.EDITOR_STATE, JSON.stringify(stateToSave));
-
-      // フォントデータを保存（カスタムフォントが読み込まれている場合）
-      const fontData = this.x1Renderer.getAllFontData();
-      if (fontData) {
-        const fontDataBase64 = this.uint8ArrayToBase64(fontData);
-        localStorage.setItem(STORAGE_KEYS.FONT_DATA, fontDataBase64);
-      }
-
-      console.log('[DEFCHRApp] Data saved to localStorage');
-    } catch (e) {
-      console.error('[DEFCHRApp] Failed to save to localStorage:', e);
-    }
+      },
+      fontData: this.x1Renderer.getAllFontData() || undefined
+    };
   }
 
   /**
@@ -1687,80 +898,39 @@ class DEFCHRApp {
    * @returns 読み込みに成功したかどうか
    */
   private loadFromLocalStorage(): boolean {
-    try {
-      const pcgDataBase64 = localStorage.getItem(STORAGE_KEYS.PCG_DATA);
-      const editBufferBase64 = localStorage.getItem(STORAGE_KEYS.EDIT_BUFFER);
-      const stateJson = localStorage.getItem(STORAGE_KEYS.EDITOR_STATE);
-
-      // どれか一つでもなければ読み込み失敗
-      if (!pcgDataBase64 || !editBufferBase64 || !stateJson) {
-        console.log('[DEFCHRApp] No saved data found in localStorage');
-        return false;
-      }
-
-      // PCGデータを復元
-      const pcgDataArray = this.base64ToUint8Array(pcgDataBase64);
-      this.pcgData.setAllData(pcgDataArray);
-
-      // 編集バッファを復元
-      const editBufferArray = this.base64ToUint8Array(editBufferBase64);
-      this.editBuffer.setAllData(editBufferArray);
-
-      // エディタ状態を復元
-      const savedState = JSON.parse(stateJson);
-      this.editorState.editMode = savedState.editMode ?? EditMode.SEPARATE;
-      this.editorState.cursorPosition = savedState.cursorPosition ?? { x: 0, y: 0 };
-      this.editorState.currentColor = savedState.currentColor ?? X1_COLORS.WHITE;
-      this.editorState.lastDirection = savedState.lastDirection ?? Direction.RIGHT;
-      this.editorState.currentCharCode = savedState.currentCharCode ?? 0;
-      this.editorState.editChrCode = savedState.editChrCode ?? 0;
-      this.gridVisible = savedState.gridVisible ?? true;
-
-      // グリッド表示状態を反映
-      this.editorRenderer.setShowGrid(this.gridVisible);
-
-      // 選択中のキャラクターを反映
-      this.definitionRenderer.setSelectedChar(this.editorState.currentCharCode);
-
-      // フォントデータを復元（存在する場合のみ）
-      const fontDataBase64 = localStorage.getItem(STORAGE_KEYS.FONT_DATA);
-      if (fontDataBase64) {
-        const fontDataArray = this.base64ToUint8Array(fontDataBase64);
-        if (fontDataArray.length === 2048) {
-          this.x1Renderer.setFontDataFromBinary(fontDataArray);
-          console.log('[DEFCHRApp] Custom font data restored');
-        }
-      }
-
-      console.log('[DEFCHRApp] Data loaded from localStorage');
-      return true;
-    } catch (e) {
-      console.error('[DEFCHRApp] Failed to load from localStorage:', e);
+    const saved = this.storageService.load();
+    if (!saved) {
       return false;
     }
-  }
 
-  /**
-   * Uint8ArrayをBase64文字列に変換
-   */
-  private uint8ArrayToBase64(array: Uint8Array): string {
-    let binary = '';
-    for (let i = 0; i < array.length; i++) {
-      binary += String.fromCharCode(array[i]);
-    }
-    return btoa(binary);
-  }
+    // PCGデータを復元
+    this.pcgData.setAllData(saved.pcgData);
 
-  /**
-   * Base64文字列をUint8Arrayに変換
-   */
-  private base64ToUint8Array(base64: string): Uint8Array {
-    const binary = atob(base64);
-    const array = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      array[i] = binary.charCodeAt(i);
+    // 編集バッファを復元
+    this.editBuffer.setAllData(saved.editBuffer);
+
+    // エディタ状態を復元
+    this.editorState.editMode = saved.editorState.editMode;
+    this.editorState.cursorPosition = saved.editorState.cursorPosition;
+    this.editorState.currentColor = saved.editorState.currentColor;
+    this.editorState.lastDirection = saved.editorState.lastDirection;
+    this.editorState.currentCharCode = saved.editorState.currentCharCode;
+    this.editorState.editChrCode = saved.editorState.editChrCode;
+    this.gridVisible = saved.editorState.gridVisible;
+
+    // グリッド表示状態を反映
+    this.editorRenderer.setShowGrid(this.gridVisible);
+
+    // 選択中のキャラクターを反映
+    this.definitionRenderer.setSelectedChar(this.editorState.currentCharCode);
+
+    // フォントデータを復元（存在する場合のみ）
+    if (saved.fontData) {
+      this.x1Renderer.setFontDataFromBinary(saved.fontData);
+      console.log('[DEFCHRApp] Custom font data restored');
     }
-    return array;
+
+    return true;
   }
 
   /**
@@ -1776,7 +946,7 @@ class DEFCHRApp {
     this.statusMessageTimeout = window.setTimeout(() => {
       this.statusMessage = '';
       this.statusMessageTimeout = null;
-    }, 2000);
+    }, STATUS_MESSAGE_DURATION);
   }
 
   /**
