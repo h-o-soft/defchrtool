@@ -225,14 +225,9 @@ class DEFCHRApp {
         break;
       }
 
-      case 'set-chr': {
-        const result = this.editorCommands.setChr(event.data.charCode);
-        if (result.needsRender) {
-          this.definitionRenderer.render();
-        }
-        this.handleCommandResult(result);
+      case 'set-chr':
+        this.handleCommandResult(this.editorCommands.setChr(event.data.charCode));
         break;
-      }
 
       case 'load-chr': {
         const result = this.editorCommands.loadChr(
@@ -248,18 +243,13 @@ class DEFCHRApp {
         this.handleCommandResult(this.editorCommands.rotation(event.data.rotationType));
         break;
 
-      case 'transfer': {
-        const result = this.editorCommands.transfer(
+      case 'transfer':
+        this.handleCommandResult(this.editorCommands.transfer(
           event.data.transfer.start,
           event.data.transfer.end,
           event.data.transfer.target
-        );
-        if (result.needsRender) {
-          this.definitionRenderer.render();
-        }
-        this.handleCommandResult(result);
+        ));
         break;
-      }
 
       case 'clear':
         this.handleCommandResult(this.editorCommands.clear());
@@ -294,6 +284,9 @@ class DEFCHRApp {
   private handleCommandResult(result: CommandResult): void {
     if (result.message) {
       this.showStatusMessage(result.message);
+    }
+    if (result.needsRender) {
+      this.definitionRenderer.render();
     }
     if (result.needsSave) {
       this.scheduleSave();

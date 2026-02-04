@@ -170,6 +170,11 @@ export class EditorCommands {
     charCode: number,
     getFontData?: (code: number) => Uint8Array
   ): CommandResult {
+    // source='rom' 時は getFontData が必須
+    if (source === 'rom' && !getFontData) {
+      return { success: false, message: 'getFontData is required for ROMCG' };
+    }
+
     const { pcgData, editBuffer, editorState } = this.ctx;
     const srcName = source === 'rom' ? 'ROMCG' : 'RAMCG';
 
