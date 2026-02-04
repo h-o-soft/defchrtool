@@ -301,6 +301,13 @@ export class X1Renderer {
   }
 
   /**
+   * バックバッファのコンテキストを取得
+   */
+  getBackContext(): CanvasRenderingContext2D {
+    return this.canvasManager.getBackContext();
+  }
+
+  /**
    * 1文字を描画
    */
   drawChar(

@@ -40,6 +40,12 @@ class DEFCHRApp {
   private statusMessage: string = '';
   private statusMessageTimeout: number | null = null;
 
+  /** 前回のステータスメッセージ（クリア判定用） */
+  private prevStatusMessage: string = '';
+
+  /** 静的要素の描画が必要かどうか（初回・モード切替時） */
+  private needsStaticRender: boolean = true;
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvasManager = new CanvasManager(canvas);
 
@@ -101,6 +107,13 @@ class DEFCHRApp {
       // デフォルトのグリッド状態を反映
       this.editorRenderer.setShowGrid(this.editorState.gridVisible);
     }
+
+    // タブ復帰時に再描画をトリガー
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        this.needsStaticRender = true;
+      }
+    });
 
     console.log('[DEFCHRApp] Initialized successfully');
   }
@@ -286,7 +299,8 @@ class DEFCHRApp {
       this.showStatusMessage(result.message);
     }
     if (result.needsRender) {
-      this.definitionRenderer.render();
+      // 定義エリアの再描画が必要な場合、フラグをセット
+      this.definitionRenderer.markNeedsRender();
     }
     if (result.needsSave) {
       this.scheduleSave();
@@ -335,6 +349,8 @@ class DEFCHRApp {
     const currentMode = this.canvasManager.getScreenMode();
     const newMode = currentMode === 'WIDTH40' ? 'WIDTH80' : 'WIDTH40';
     this.canvasManager.setScreenMode(newMode);
+    // 静的要素の再描画が必要
+    this.needsStaticRender = true;
     this.showStatusMessage(`${newMode}`);
   }
 
@@ -356,6 +372,8 @@ class DEFCHRApp {
         const data = new Uint8Array(arrayBuffer);
 
         if (this.x1Renderer.setFontDataFromBinary(data)) {
+          // 編集エリアの●パターンキャッシュをクリア
+          this.editorRenderer.clearPatternCache();
           this.showStatusMessage(`Font loaded: ${file.name}`);
           this.scheduleSave();
         } else {
@@ -465,7 +483,7 @@ class DEFCHRApp {
         }
 
         // 定義エリアを更新
-        this.definitionRenderer.render();
+        this.definitionRenderer.markNeedsRender();
         this.scheduleSave();
       } catch (e) {
         console.error('[DEFCHRApp] File load error:', e);
@@ -535,6 +553,8 @@ class DEFCHRApp {
     // フォントデータを復元（存在する場合のみ）
     if (saved.fontData) {
       this.x1Renderer.setFontDataFromBinary(saved.fontData);
+      // 編集エリアの●パターンキャッシュをクリア
+      this.editorRenderer.clearPatternCache();
       console.log('[DEFCHRApp] Custom font data restored');
     }
 
@@ -580,34 +600,46 @@ class DEFCHRApp {
 
   /**
    * 描画処理
+   * パフォーマンス最適化: 静的要素は初回のみ、動的要素は必要時のみ描画
    */
   private render(): void {
-    // 画面クリア
-    this.x1Renderer.clear();
+    // 静的要素の描画（初回・モード切替・タブ復帰時のみ）
+    if (this.needsStaticRender) {
+      // 画面全体をクリア
+      this.x1Renderer.clear();
 
-    // タイトル
-    this.screenLayout.drawTitle();
+      // タイトル
+      this.screenLayout.drawTitle();
 
-    // 編集エリア枠
-    this.screenLayout.drawEditorFrame();
+      // 編集エリア枠
+      this.screenLayout.drawEditorFrame();
+
+      // 定義エリア枠
+      this.screenLayout.drawDefinitionFrame();
+
+      // 定義エリアも再描画が必要
+      this.definitionRenderer.markNeedsRender();
+
+      this.needsStaticRender = false;
+    }
 
     // カーソル位置をPosition形式で渡す
     const cursorPosition = { x: this.editorState.cursorX, y: this.editorState.cursorY };
 
-    // 編集エリア描画（編集バッファは常にcharCode 0から）
+    // 編集エリア描画（毎フレーム - カーソル点滅があるため）
+    // EditorRenderer.render() 内で自領域をクリアする
     this.editorRenderer.render(
       0,  // 編集バッファのベースコードは常に0
       this.editorState.editMode,
       cursorPosition
     );
 
-    // 定義エリア枠
-    this.screenLayout.drawDefinitionFrame();
-
-    // 定義エリア描画
+    // 定義エリア描画（needsRenderがtrueの時のみ）
+    // DefinitionRenderer.render() 内で自領域をクリアする
     this.definitionRenderer.render();
 
-    // メニュー表示
+    // メニュー表示（毎フレーム - 小さい領域なので許容）
+    this.screenLayout.clearMenuArea();
     this.screenLayout.drawMenu(
       this.editorState.editMode,
       this.editorState.currentCharCode,
@@ -618,18 +650,29 @@ class DEFCHRApp {
     );
 
     // プレビュー表示（右下 座標35,22）
-    // 編集中の画像をリアルタイムで表示（カーソル位置に応じた文字を表示）
+    // プレビュー領域をクリアしてから描画
+    const previewX = 35 * 8;
+    const previewY = 22 * 8;
+    const ctx = this.x1Renderer.getBackContext();
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(previewX, previewY, 16, 16);
     this.editorRenderer.renderActualSize(
-      35 * 8,  // x = 280
-      22 * 8,  // y = 176
+      previewX,
+      previewY,
       0,  // 編集バッファのベースコードは常に0
       this.editorState.editMode,
       cursorPosition
     );
 
-    // ステータスメッセージ（一時表示）
-    if (this.statusMessage) {
-      this.x1Renderer.drawText(0, 26 * 8, this.statusMessage, X1_COLORS.WHITE, X1_COLORS.BLACK);
+    // ステータスメッセージ（変更時のみ更新）
+    if (this.statusMessage !== this.prevStatusMessage) {
+      // ステータス行をクリア
+      this.screenLayout.clearStatusLine(26);
+      // メッセージがあれば描画
+      if (this.statusMessage) {
+        this.x1Renderer.drawText(0, 26 * 8, this.statusMessage, X1_COLORS.WHITE, X1_COLORS.BLACK);
+      }
+      this.prevStatusMessage = this.statusMessage;
     }
 
     // フリップ

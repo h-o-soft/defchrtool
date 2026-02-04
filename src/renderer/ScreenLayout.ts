@@ -339,6 +339,29 @@ export class ScreenLayout {
   }
 
   /**
+   * メニューエリアをクリア（6行分）
+   */
+  clearMenuArea(): void {
+    const ctx = this.x1Renderer.getBackContext();
+    const y = LAYOUT.MENU_Y * CHAR_HEIGHT;
+    const height = 6 * CHAR_HEIGHT;
+    // WIDTH 40モードの幅（40文字 = 320px）
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, y, 320, height);
+  }
+
+  /**
+   * ステータス行をクリア（1行）
+   * @param row 行番号
+   */
+  clearStatusLine(row: number): void {
+    const ctx = this.x1Renderer.getBackContext();
+    const y = row * CHAR_HEIGHT;
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, y, 320, CHAR_HEIGHT);
+  }
+
+  /**
    * 編集エリアの内部座標（ピクセル）を取得
    */
   getEditorAreaPixelOffset(): { x: number; y: number } {
