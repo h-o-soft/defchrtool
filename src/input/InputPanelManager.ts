@@ -52,6 +52,7 @@ export class InputPanelManager {
   private progModeRadios: NodeListOf<HTMLInputElement> | null = null;
   private progModeLoadLabel: HTMLElement | null = null;
   private progModeLoadRadio: HTMLInputElement | null = null;
+  private progModeSaveRadio: HTMLInputElement | null = null;
   private progRangeRow: HTMLElement | null = null;
   private progStartField: HTMLInputElement | null = null;
   private progEndField: HTMLInputElement | null = null;
@@ -201,6 +202,7 @@ export class InputPanelManager {
     this.progModeRadios = document.querySelectorAll('input[name="prog-mode"]') as NodeListOf<HTMLInputElement>;
     this.progModeLoadLabel = document.getElementById('mode-load-label');
     this.progModeLoadRadio = document.getElementById('mode-load') as HTMLInputElement;
+    this.progModeSaveRadio = document.getElementById('mode-save') as HTMLInputElement;
     this.progRangeRow = document.getElementById('range-row');
     this.progStartField = document.getElementById('prog-start') as HTMLInputElement;
     this.progEndField = document.getElementById('prog-end') as HTMLInputElement;
@@ -322,7 +324,7 @@ export class InputPanelManager {
     if (this.programmingArea) {
       // デフォルト値にリセット
       this.progFormatRadios?.forEach(radio => {
-        radio.checked = radio.value === 'png';
+        radio.checked = radio.value === 'image';
       });
       this.progModeRadios?.forEach(radio => {
         radio.checked = radio.value === 'save';
@@ -380,13 +382,29 @@ export class InputPanelManager {
    */
   private updateProgrammingUI(): void {
     const selectedFormat = this.getSelectedFormat();
-    const selectedMode = this.getSelectedMode();
 
     // 全フォーマットでLOADを有効化
     if (this.progModeLoadRadio && this.progModeLoadLabel) {
       this.progModeLoadRadio.disabled = false;
       this.progModeLoadLabel.classList.remove('disabled');
     }
+
+    // ASMの場合、LOADを無効化しSAVEを強制選択
+    if (selectedFormat === 'asm') {
+      if (this.progModeLoadRadio) {
+        this.progModeLoadRadio.disabled = true;
+        this.progModeLoadRadio.checked = false;
+      }
+      if (this.progModeLoadLabel) {
+        this.progModeLoadLabel.classList.add('disabled');
+      }
+      if (this.progModeSaveRadio) {
+        this.progModeSaveRadio.checked = true;
+      }
+    }
+
+    // selectedMode はASM強制切替の後に取得
+    const selectedMode = this.getSelectedMode();
 
     // IMAGEの場合、範囲入力を非表示
     if (this.progRangeRow) {

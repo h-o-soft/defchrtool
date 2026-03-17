@@ -6,4 +6,5 @@
 export { BinFormat } from './BinFormat';
 export { BasFormat } from './BasFormat';
 export { ImageFormat } from './ImageFormat';
+export { AsmFormat } from './AsmFormat';
 export type { ColorReduceMode } from './ImageFormat';

@@ -12,7 +12,7 @@ import { PCGData } from './core/PCGData';
 import { InputHandler, InputEvent, ColorReduceMode, BasSaveFormat, FileFormat } from './input/InputHandler';
 import { X1_COLORS, EditMode, X1Color } from './core/types';
 import { STATUS_MESSAGE_DURATION } from './core/constants';
-import { BinFormat, BasFormat, ImageFormat } from './io';
+import { BinFormat, BasFormat, ImageFormat, AsmFormat } from './io';
 import { LocalStorageService } from './storage';
 import { EditorState, EditorCommands, CommandResult } from './app';
 
@@ -414,6 +414,10 @@ class DEFCHRApp {
             fileName = BasFormat.getDefaultFileName(false);
           }
           break;
+        case 'asm':
+          blob = AsmFormat.save(this.pcgData, start, end);
+          fileName = AsmFormat.getDefaultFileName();
+          break;
         default:
           return;
       }
@@ -431,6 +435,11 @@ class DEFCHRApp {
    * ファイル読み込み処理
    */
   private handleFileLoad(format: FileFormat, start: number, basLoadMode?: 'start' | 'original', reduceMode?: ColorReduceMode): void {
+    if (format === 'asm') {
+      this.showStatusMessage('ASM format does not support loading', true);
+      return;
+    }
+
     const input = document.createElement('input');
     input.type = 'file';
 
