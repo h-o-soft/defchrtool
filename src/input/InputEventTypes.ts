@@ -16,7 +16,7 @@ export type InputMode =
 export type InputDeviceMode = 'keyboard' | 'mouse';
 
 /** ファイルフォーマット */
-export type FileFormat = 'image' | 'bin' | 'bin3' | 'bas';
+export type FileFormat = 'image' | 'bin' | 'bin3' | 'bas' | 'asm';
 
 /** 減色モード */
 export type ColorReduceMode = 'none' | 'reduce' | 'dither' | 'edfs' | 'retro';
