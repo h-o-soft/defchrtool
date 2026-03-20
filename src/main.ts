@@ -415,8 +415,12 @@ class DEFCHRApp {
           }
           break;
         case 'asm':
-          blob = AsmFormat.save(this.pcgData, start, end);
-          fileName = AsmFormat.getDefaultFileName();
+          blob = AsmFormat.save(this.pcgData, start, end, false);
+          fileName = AsmFormat.getDefaultFileName(false);
+          break;
+        case 'asm3':
+          blob = AsmFormat.save(this.pcgData, start, end, true);
+          fileName = AsmFormat.getDefaultFileName(true);
           break;
         default:
           return;
@@ -435,7 +439,7 @@ class DEFCHRApp {
    * ファイル読み込み処理
    */
   private handleFileLoad(format: FileFormat, start: number, basLoadMode?: 'start' | 'original', reduceMode?: ColorReduceMode): void {
-    if (format === 'asm') {
+    if (format === 'asm' || format === 'asm3') {
       this.showStatusMessage('ASM format does not support loading', true);
       return;
     }
