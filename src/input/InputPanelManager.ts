@@ -390,7 +390,7 @@ export class InputPanelManager {
     }
 
     // ASMの場合、LOADを無効化しSAVEを強制選択
-    if (selectedFormat === 'asm') {
+    if (selectedFormat === 'asm' || selectedFormat === 'asm3') {
       if (this.progModeLoadRadio) {
         this.progModeLoadRadio.disabled = true;
         this.progModeLoadRadio.checked = false;
