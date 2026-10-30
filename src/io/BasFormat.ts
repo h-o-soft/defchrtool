@@ -5,6 +5,8 @@
 
 import { PCGData } from '../core/PCGData';
 import { BAS_LINE_START } from '../core/constants';
+import { validateHuBasicLines } from '../host/X1Host';
+import type { HuBasicLines } from '../host/X1Host';
 
 /** X1 BASICトークン定義 */
 const TOKENS = {
@@ -34,10 +36,15 @@ export class BasFormat {
    * @param end 終了文字コード
    * @returns Blob
    */
-  static saveAscii(pcgData: PCGData, start: number, end: number): Blob {
+  static saveAscii(pcgData: PCGData, start: number, end: number, options?: HuBasicLines): Blob {
     const count = end - start + 1;
     if (count <= 0) {
       throw new Error('Invalid range');
+    }
+
+    if (options) {
+      const error = validateHuBasicLines(options, count);
+      if (error) throw new Error(error);
     }
 
     const lines: string[] = [];
@@ -53,7 +60,7 @@ export class BasFormat {
       }
 
       // DEFCHR$(code)=HEXCHR$("...")
-      const lineNum = BAS_LINE_START + i * 10;
+      const lineNum = (options?.lineStart ?? BAS_LINE_START) + i * (options?.lineStep ?? 10);
       lines.push(`${lineNum}DEFCHR$(${charCode})=HEXCHR$("${hexStr}")`);
     }
 

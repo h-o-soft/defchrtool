@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node tests/formats.test.mjs",
+    "test:browser": "node tests/browser.mjs"
   },
   "keywords": ["x1", "retro", "pcg", "pixel-art"],
   "author": "H.O SOFT",

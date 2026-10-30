@@ -202,6 +202,37 @@
       /* PROGRAMMINGエリア */
       #programming-area {
         min-width: 450px;
+        max-width: calc(100vw - 60px);
+        max-height: calc(100vh - 60px);
+        overflow: auto;
+      }
+
+      #programming-area [hidden] {
+        display: none !important;
+      }
+
+      #programming-area select {
+        background: #1a1a2e;
+        color: #fff;
+        border: 1px solid #00ff88;
+        padding: 4px;
+        font: inherit;
+      }
+
+      #programming-area .host-lines input {
+        width: 75px;
+      }
+
+      #host-output-note {
+        max-width: 600px;
+        white-space: normal;
+        font-size: 13px;
+      }
+
+      @media (max-width: 650px) {
+        #programming-area { min-width: 0; width: calc(100vw - 60px); }
+        #programming-area .form-row,
+        #programming-area .radio-group { flex-wrap: wrap; gap: 8px; }
       }
 
       #programming-area .panel-title {
@@ -413,6 +444,31 @@
     <!-- PROGRAMMINGエリア -->
     <div id="programming-area" class="input-panel">
       <div class="panel-title">## DEFCHR Programming ##</div>
+
+      <div class="form-row" id="host-delivery-row" hidden>
+        <label class="form-label" for="host-delivery">保存先:</label>
+        <select id="host-delivery">
+          <option value="host">X1Pen に挿入</option>
+          <option value="file">ファイル保存</option>
+        </select>
+      </div>
+      <div class="form-row" id="host-target-row" hidden>
+        <label class="form-label" for="host-target">出力先:</label>
+        <select id="host-target">
+          <option value="">選んでください</option>
+          <option value="fuzzybasic">FuzzyBASIC</option>
+          <option value="asm">ASM</option>
+          <option value="slang">SLANG</option>
+          <option value="hubasic">HuBASIC</option>
+        </select>
+      </div>
+      <div class="form-row host-lines" id="host-lines-row" hidden>
+        <label class="form-label" for="host-line-start">開始行:</label>
+        <input type="text" id="host-line-start" inputmode="numeric" value="60960">
+        <label class="field-label" for="host-line-step">ステップ:</label>
+        <input type="text" id="host-line-step" inputmode="numeric" value="10">
+      </div>
+      <p id="host-output-note" role="status" hidden></p>
 
       <!-- Format選択 -->
       <div class="form-row">

@@ -112,11 +112,13 @@ DEFCHR TOOLは、SHARP X1のシステムディスクに収録されていたPCG�
 | BIN | ○ | ○ | バイナリ形式（BRG順、24バイト/文字） |
 | BIN(x3) | ○ | ○ | 三倍速定義フォーマット |
 | BAS | ○ | ○ | BASIC ASCII形式（DEFCHR$文） |
+| ASM | ○ | — | 面ごとに並ぶDB文 |
+| ASM(x3) | ○ | — | 行ごとのB/R/G順に並ぶDB文 |
 
 #### 操作手順
 
 1. `P`キーでPROGRAMMINGパネルを表示
-2. フォーマットを選択（PNG / BIN / BIN(x3) / BAS）
+2. フォーマットを選択（IMAGE / BIN / BIN(x3) / BAS / ASM / ASM(x3)）
 3. SAVE / LOAD を選択
 4. 範囲を指定（PNG以外）
 5. EXECボタンで実行
@@ -145,11 +147,35 @@ DEFCHR TOOLは、SHARP X1のシステムディスクに収録されていたPCG�
 
 編集データはブラウザのローカルストレージに自動保存されます。ページをリロードしても編集内容が保持されます。
 
+### X1Pen への挿入
+
+X1Pen 内で起動した場合、PROGRAMMING の SAVE に「保存先」と「出力先」が表示されます。
+「X1Pen に挿入」を選び、FuzzyBASIC / ASM / SLANG / HuBASIC の出力先を明示的に選んでください。
+選択すると推奨形式に切り替わります。形式はその後も手動変更できます。
+
+| 出力先 | 推奨形式 | 挿入先 |
+| --- | --- | --- |
+| FuzzyBASIC | ASM(x3) | ASM タブ（PCGDEF で読むデータ） |
+| ASM | ASM(x3) | ASM タブ |
+| SLANG | BIN(x3) | SLANG タブの ARRAY BYTE |
+| HuBASIC | BAS / ASC | HuBASIC タブの DEFCHR$ |
+
+HuBASIC の開始行は60960、ステップは10が初期値です。最後の行番号は65529以下にしてください。
+同じ行番号に同じ文字の DEFCHR$ がある場合は置き換え、それ以外の行との衝突は拒否します。
+**HuBASIC への反映はエディタの Undo 履歴を消すため、Ctrl+Z では戻せません。** RETURN は追加しません。
+
+「ファイル保存」を選ぶと従来の保存操作が使えます。単独の GitHub Pages では従来どおり動作します。
+X1Pen と GitHub Pages の編集データはそれぞれの origin に保存され、自動共有されません。
+送信エラー時には自動再送・自動ダウンロードをしません。応答がない場合は挿入先を確認したうえで
+ページを再読み込みしてください（再読み込みは送信取消を保証しません）。
+
+組込方法、形式の対応表、失敗時の契約は [X1HOST.md](X1HOST.md) を参照してください。
+
 ## 開発
 
 ### 必要環境
 
-- Node.js 18以上
+- Node.js 22.12以上
 - npm
 
 ### セットアップ
@@ -173,6 +199,20 @@ npm run build
 ```
 
 ビルド結果は `dist/` ディレクトリに出力されます。
+
+### 検証
+
+```bash
+npm test
+npm run build
+npm run test:browser
+```
+
+`npm test` はバイト順、行番号、ホストの受渡し・応答検証を確認します。
+`test:browser` はローカルの Chrome を使い、単独保存・同一 origin の iframe・エラー復帰・保存復元を確認します。
+追加の npm 依存は不要です。Chrome のパスは `CHROME_BIN` で指定できます（既定 `/usr/bin/google-chrome`）。
+相対パス配布は `npx vite build --base ./ --outDir /tmp/defchrtool-relative` の後に
+`npm run test:browser -- /tmp/defchrtool-relative` で同じ操作を確認できます。
 
 ## 技術仕様
 
