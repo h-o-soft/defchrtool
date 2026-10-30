@@ -14,6 +14,9 @@ let chrome;
 let socket;
 let embedded = false;
 const exceptions = [];
+let fontGate;
+let releaseFont;
+let fontWaiting = false;
 
 const fixture = `<!doctype html><meta charset="utf-8"><script>
 window.requests = [];
@@ -36,7 +39,13 @@ window.host = { async exportPCG(request) {
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
-    if (url.pathname === '/fixture') return res.end(fixture);
+    if (url.pathname === '/fixture') {
+      if (url.searchParams.has('slow-font')) {
+        fontWaiting = false;
+        fontGate = new Promise(resolve => { releaseFont = resolve; });
+      }
+      return res.end(fixture);
+    }
     if (url.pathname === '/test-host.js') {
       res.setHeader('Content-Type', 'application/javascript');
       return res.end('window.X1Host = parent.host;');
@@ -44,6 +53,11 @@ const server = createServer(async (req, res) => {
     const relative = url.pathname.replace(/^\/defchrtool\//, '');
     const file = resolve(buildDir, relative);
     if (!file.startsWith(buildDir + '/')) { res.writeHead(404); return res.end(); }
+    if (relative === 'assets/fonts/X1font.png' && fontGate) {
+      fontWaiting = true;
+      await fontGate;
+      fontGate = undefined;
+    }
     let content = await readFile(file);
     const type = { '.html': 'text/html', '.js': 'application/javascript', '.png': 'image/png', '.css': 'text/css' }[extname(file)];
     res.setHeader('Content-Type', type ?? 'application/octet-stream');
@@ -138,6 +152,8 @@ try {
   await new Promise((resolve, reject) => { socket.addEventListener('open', resolve); socket.addEventListener('error', reject); });
   await cdp('Page.enable');
   await cdp('Runtime.enable');
+  await cdp('Network.enable');
+  await cdp('Network.setCacheDisabled', { cacheDisabled: true });
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `
     const log = console.log;
     console.log = (...args) => { if (args[0] === '[DEFCHRApp] Initialized successfully') window.__ready = true; log(...args); };
@@ -198,7 +214,21 @@ try {
     assert.equal(await evaluate(w => w.document.querySelector('input[name="prog-format"]:checked').value), format);
     assert.equal(await evaluate(w => !w.document.getElementById('host-lines-row').hidden), target === 'hubasic');
     await field('prog-start', '41'); await field('prog-end', '42');
-    if (target === 'hubasic') { await field('host-line-start', '100'); await field('host-line-step', '5'); }
+    if (target === 'hubasic') {
+      const fits = await evaluate(w => {
+        return ['host-line-start', 'host-line-step'].every(id => {
+          const input = w.document.getElementById(id);
+          const style = w.getComputedStyle(input);
+          const ctx = w.document.createElement('canvas').getContext('2d');
+          ctx.font = `${style.fontSize} ${style.fontFamily}`;
+          const textWidth = ctx.measureText('65529').width;
+          const available = input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+          return available >= textWidth;
+        });
+      });
+      assert.equal(fits, true, 'five-digit HuBASIC line numbers fit without clipping');
+      await field('host-line-start', '100'); await field('host-line-step', '5');
+    }
     const before = await requestCount();
     await click('prog-exec-btn');
     await until(async () => await requestCount() === before + 1 && !(await panelVisible()), `${target} inserts`);
@@ -276,11 +306,13 @@ try {
   console.log('PASS UI: manual formats persist; unsupported formats can save locally; pending send cannot duplicate');
 
   const storedBefore = await evaluate(w => w.localStorage.getItem('defchr-pcgdata'));
+  const downloadsBeforeLostHost = await evaluate(w => w.downloads.length);
   await openPanel();
   await evaluate(w => { delete w.X1Host; });
   await click('prog-exec-btn');
   await until(() => evaluate(w => w.document.getElementById('host-output-note').textContent.includes('接続')), 'host removed');
   assert.equal(await requestCount(), beforePending + 1);
+  assert.equal(await evaluate(w => w.downloads.length), downloadsBeforeLostHost);
   await key('Escape');
   // Exercise normal keyboard drawing and the existing autosave/restore path.
   const editBefore = await evaluate(w => w.localStorage.getItem('defchr-editbuffer'));
@@ -313,11 +345,24 @@ try {
   await until(async () => await requestCount() === beforeRestored + 1, 'restored edit buffer exports after SET CHR');
   const restored = await evaluate(w => w.parent.requests.at(-1).bytes);
   assert.equal(restored[0], 128); assert.equal(restored[8], 128); assert.equal(restored[16], 128);
-  assert.deepEqual(exceptions, []);
   console.log('PASS state: lost host does not download; keyboard/autosave/reload; export preferences reset on reload');
+
+  await cdp('Page.navigate', { url: `${origin}/fixture?slow-font` });
+  await until(() => fontWaiting, 'font request held before app input callback is registered');
+  await openPanel(); await select('host-target', 'hubasic');
+  await click('prog-exec-btn');
+  assert.equal(await evaluate(w => w.document.getElementById('prog-exec-btn').disabled), false);
+  assert.equal(await requestCount(), 0);
+  releaseFont();
+  await until(() => evaluate(w => w.__ready), 'font completes app initialization');
+  await click('prog-exec-btn');
+  await until(async () => await requestCount() === 1 && !(await panelVisible()), 'startup export recovers without a lock');
+  assert.deepEqual(exceptions, []);
+  console.log('PASS startup: export before font load does not leave a busy panel');
   }
   console.log(`Browser checks passed (${buildDir}).`);
 } finally {
+  releaseFont?.();
   socket?.close();
   if (chrome?.pid && chrome.exitCode === null && chrome.signalCode === null) {
     const exited = new Promise(resolve => chrome.once('exit', resolve));

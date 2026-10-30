@@ -750,7 +750,6 @@ export class InputPanelManager {
           this.showHostNote(error, true);
           return;
         }
-        this.setProgrammingBusy(true);
         this.emit({ type: 'file-save', data: { file } });
       } else {
         this.closeProgramming();
