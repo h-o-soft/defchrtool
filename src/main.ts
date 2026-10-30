@@ -9,7 +9,9 @@ import { EditorRenderer } from './renderer/EditorRenderer';
 import { DefinitionRenderer } from './renderer/DefinitionRenderer';
 import { ScreenLayout } from './renderer/ScreenLayout';
 import { PCGData } from './core/PCGData';
-import { InputHandler, InputEvent, ColorReduceMode, BasSaveFormat, FileFormat } from './input/InputHandler';
+import { InputHandler, InputEvent, ColorReduceMode, FileFormat } from './input/InputHandler';
+import type { FileParams } from './input/InputEventTypes';
+import { isPCGTarget, isValidRange, sendPCGToHost, validateHostExport } from './host/X1Host';
 import { X1_COLORS, EditMode, X1Color } from './core/types';
 import { STATUS_MESSAGE_DURATION } from './core/constants';
 import { BinFormat, BasFormat, ImageFormat, AsmFormat } from './io';
@@ -42,6 +44,7 @@ class DEFCHRApp {
 
   /** 静的要素の描画が必要かどうか（初回・モード切替時） */
   private needsStaticRender: boolean = true;
+  private hostExportBusy = false;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvasManager = new CanvasManager(canvas);
@@ -269,7 +272,7 @@ class DEFCHRApp {
         break;
 
       case 'file-save':
-        this.handleFileSave(event.data.file.format, event.data.file.start, event.data.file.end, event.data.file.basFormat);
+        void this.handleFileSave(event.data.file);
         break;
 
       case 'file-load':
@@ -387,51 +390,81 @@ class DEFCHRApp {
   /**
    * ファイル保存処理
    */
-  private async handleFileSave(format: FileFormat, start: number, end: number, basFormat?: BasSaveFormat): Promise<void> {
+  private async handleFileSave(params: FileParams): Promise<void> {
+    if (this.hostExportBusy) return;
+    const { format, start, end, basFormat } = params;
+    const toHost = params.delivery === 'host';
+    const target = params.target;
+    const hubasic = params.hubasic ? { ...params.hubasic } : undefined;
+    if (toHost) {
+      this.hostExportBusy = true;
+      this.inputHandler.setProgrammingBusy(true);
+    }
     try {
+      if (format !== 'image' && !isValidRange(start, end)) throw new Error('Invalid character range');
+      if (toHost) {
+        const error = validateHostExport(params);
+        if (error) throw new Error(error);
+      }
+      // A host may finish asynchronously; never hand it live editable PCG data.
+      const pcgData = toHost ? this.pcgData.clone() : this.pcgData;
       let blob: Blob;
       let fileName: string;
 
       switch (format) {
         case 'image':
-          blob = await ImageFormat.savePng(this.pcgData);
+          blob = await ImageFormat.savePng(pcgData);
           fileName = ImageFormat.getDefaultFileName();
           break;
         case 'bin':
-          blob = BinFormat.save(this.pcgData, start, end, false);
+          blob = BinFormat.save(pcgData, start, end, false);
           fileName = BinFormat.getDefaultFileName(false);
           break;
         case 'bin3':
-          blob = BinFormat.save(this.pcgData, start, end, true);
+          blob = BinFormat.save(pcgData, start, end, true);
           fileName = BinFormat.getDefaultFileName(true);
           break;
         case 'bas':
           if (basFormat === 'bin') {
-            blob = BasFormat.saveBinary(this.pcgData, start, end);
+            blob = BasFormat.saveBinary(pcgData, start, end);
             fileName = BasFormat.getDefaultFileName(true);
           } else {
-            blob = BasFormat.saveAscii(this.pcgData, start, end);
+            blob = BasFormat.saveAscii(pcgData, start, end, toHost && target === 'hubasic' ? hubasic : undefined);
             fileName = BasFormat.getDefaultFileName(false);
           }
           break;
         case 'asm':
-          blob = AsmFormat.save(this.pcgData, start, end, false);
+          blob = AsmFormat.save(pcgData, start, end, false);
           fileName = AsmFormat.getDefaultFileName(false);
           break;
         case 'asm3':
-          blob = AsmFormat.save(this.pcgData, start, end, true);
+          blob = AsmFormat.save(pcgData, start, end, true);
           fileName = AsmFormat.getDefaultFileName(true);
           break;
         default:
-          return;
+          throw new Error('Unknown file format');
       }
 
-      // ダウンロード
-      this.downloadBlob(blob, fileName);
-      this.showStatusMessage(`Saved: ${fileName}`);
+      if (toHost && isPCGTarget(target)) {
+        const result = await sendPCGToHost({
+          version: 1, target, format, start, end, fileName, blob,
+          ...(format === 'bas' ? { basFormat } : {}),
+          ...(target === 'hubasic' ? { hubasic } : {})
+        });
+        const message = result.ok ? result.message ?? 'X1Pen に挿入しました。' : result.message;
+        this.inputHandler.finishHostExport(result.ok, message);
+        this.showStatusMessage(message, !result.ok);
+      } else {
+        this.downloadBlob(blob, fileName);
+        this.showStatusMessage(`Saved: ${fileName}`);
+      }
     } catch (e) {
       console.error('[DEFCHRApp] File save error:', e);
-      this.showStatusMessage(e instanceof Error ? e.message : 'Save failed', true);
+      const message = e instanceof Error ? e.message : 'Save failed';
+      if (toHost) this.inputHandler.finishHostExport(false, message);
+      this.showStatusMessage(message, true);
+    } finally {
+      if (toHost) this.hostExportBusy = false;
     }
   }
 

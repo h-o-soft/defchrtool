@@ -4,6 +4,7 @@
  */
 
 import { Direction, X1Color } from '../core/types';
+import type { HuBasicLines, PCGTarget } from '../host/X1Host';
 
 /** 入力モード */
 export type InputMode =
@@ -50,6 +51,9 @@ export interface FileParams {
   basLoadMode?: 'start' | 'original';
   reduceMode?: ColorReduceMode;
   basFormat?: BasSaveFormat;
+  delivery?: 'file' | 'host';
+  target?: PCGTarget;
+  hubasic?: HuBasicLines;
 }
 
 /** マウス座標（ドット座標） */

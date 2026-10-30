@@ -10,6 +10,7 @@ import {
   BasSaveFormat
 } from './InputEventTypes';
 import { getRotationTypeFromNumber } from './KeyBindings';
+import { DEFAULT_HUBASIC_LINES, getHostFormatError, getRecommendedFormat, getX1Host, isPCGTarget, validateHostExport } from '../host/X1Host';
 
 /** プロンプトコールバック */
 type PromptCallback = (value: string | null) => void;
@@ -64,6 +65,17 @@ export class InputPanelManager {
   private imageReduceModeRow: HTMLElement | null = null;
   private imageReduceModeRadios: NodeListOf<HTMLInputElement> | null = null;
   private basLoadModeRadios: NodeListOf<HTMLInputElement> | null = null;
+  private hostDeliveryRow: HTMLElement | null = null;
+  private hostTargetRow: HTMLElement | null = null;
+  private hostLinesRow: HTMLElement | null = null;
+  private hostNote: HTMLElement | null = null;
+  private hostDelivery: HTMLSelectElement | null = null;
+  private hostTarget: HTMLSelectElement | null = null;
+  private hostLineStart: HTMLInputElement | null = null;
+  private hostLineStep: HTMLInputElement | null = null;
+  private hostEnabled = false;
+  private hostSettingsInitialized = false;
+  private programmingBusy = false;
 
   // コールバック
   private promptCallback: PromptCallback | null = null;
@@ -214,6 +226,30 @@ export class InputPanelManager {
     this.basSaveFormatRadios = document.querySelectorAll('input[name="bas-save-format"]') as NodeListOf<HTMLInputElement>;
     this.imageReduceModeRow = document.getElementById('image-reduce-mode-row');
     this.imageReduceModeRadios = document.querySelectorAll('input[name="image-reduce-mode"]') as NodeListOf<HTMLInputElement>;
+    this.hostDeliveryRow = document.getElementById('host-delivery-row');
+    this.hostTargetRow = document.getElementById('host-target-row');
+    this.hostLinesRow = document.getElementById('host-lines-row');
+    this.hostNote = document.getElementById('host-output-note');
+    this.hostDelivery = document.getElementById('host-delivery') as HTMLSelectElement;
+    this.hostTarget = document.getElementById('host-target') as HTMLSelectElement;
+    this.hostLineStart = document.getElementById('host-line-start') as HTMLInputElement;
+    this.hostLineStep = document.getElementById('host-line-step') as HTMLInputElement;
+
+    this.hostDelivery?.addEventListener('change', () => this.updateProgrammingUI(), { signal: this.abortController!.signal });
+    this.hostTarget?.addEventListener('change', () => {
+      const target = this.hostTarget?.value;
+      if (isPCGTarget(target)) {
+        const recommended = getRecommendedFormat(target);
+        this.progFormatRadios?.forEach(radio => { radio.checked = radio.value === recommended.format; });
+        if (recommended.basFormat) {
+          this.basSaveFormatRadios?.forEach(radio => { radio.checked = radio.value === recommended.basFormat; });
+        }
+      }
+      this.updateProgrammingUI();
+    }, { signal: this.abortController!.signal });
+    this.basSaveFormatRadios?.forEach(radio => {
+      radio.addEventListener('change', () => this.updateProgrammingUI(), { signal: this.abortController!.signal });
+    });
 
     // フォーマット変更時の処理
     this.progFormatRadios?.forEach(radio => {
@@ -320,12 +356,23 @@ export class InputPanelManager {
    * PROGRAMMING UIを表示
    */
   showProgrammingUI(): void {
+    if (this.programmingBusy) return;
     this.hideAllPanels();
     if (this.programmingArea) {
-      // デフォルト値にリセット
-      this.progFormatRadios?.forEach(radio => {
-        radio.checked = radio.value === 'image';
-      });
+      const available = getX1Host() !== null;
+      if (available && !this.hostSettingsInitialized) {
+        if (this.hostDelivery) this.hostDelivery.value = 'host';
+        if (this.hostTarget) this.hostTarget.value = '';
+        if (this.hostLineStart) this.hostLineStart.value = String(DEFAULT_HUBASIC_LINES.lineStart);
+        if (this.hostLineStep) this.hostLineStep.value = String(DEFAULT_HUBASIC_LINES.lineStep);
+        this.basSaveFormatRadios?.forEach(radio => { radio.checked = radio.value === 'asc'; });
+      }
+      // Keep a previously selected host route visible if its method disappears.
+      this.hostEnabled = available || this.hostSettingsInitialized;
+      if (!this.hostSettingsInitialized) {
+        this.progFormatRadios?.forEach(radio => { radio.checked = radio.value === 'image'; });
+      }
+      if (available) this.hostSettingsInitialized = true;
       this.progModeRadios?.forEach(radio => {
         radio.checked = radio.value === 'save';
       });
@@ -335,6 +382,39 @@ export class InputPanelManager {
       this.updateProgrammingUI();
       this.programmingArea.classList.add('visible');
     }
+  }
+
+  setProgrammingBusy(busy: boolean): void {
+    this.programmingBusy = busy;
+    this.programmingArea?.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input, select, button')
+      .forEach(control => { control.disabled = busy; });
+    this.updateProgrammingUI();
+    if (busy) {
+      this.showHostNote('X1Pen に送信中です。応答がない場合は出力先の反映状況を確認してから再読み込みしてください。再読み込みは送信の取消にはなりません。');
+    }
+  }
+
+  finishHostExport(success: boolean, message: string): void {
+    this.setProgrammingBusy(false);
+    if (success) {
+      this.closeProgramming();
+    } else {
+      this.showHostNote(message, true);
+    }
+  }
+
+  private showHostNote(message: string, isError = false): void {
+    if (!this.hostNote) return;
+    this.hostNote.hidden = false;
+    this.hostNote.textContent = message;
+    this.hostNote.style.color = isError ? '#ff6666' : '#ffff00';
+  }
+
+  private closeProgramming(): void {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && this.programmingArea?.contains(active)) active.blur();
+    this.hideAllPanels();
+    this.setMode('edit');
   }
 
   // ==================== パネル状態チェック ====================
@@ -381,6 +461,7 @@ export class InputPanelManager {
    * PROGRAMMING UIの状態を更新
    */
   private updateProgrammingUI(): void {
+    if (this.programmingBusy) return;
     const selectedFormat = this.getSelectedFormat();
 
     // 全フォーマットでLOADを有効化
@@ -437,6 +518,33 @@ export class InputPanelManager {
       this.imageReduceModeRow.style.display =
         (selectedFormat === 'image' && selectedMode === 'load') ? 'flex' : 'none';
     }
+
+    const hostSave = this.hostEnabled && selectedMode === 'save';
+    const inserting = hostSave && this.hostDelivery?.value === 'host';
+    if (this.hostDeliveryRow) this.hostDeliveryRow.hidden = !hostSave;
+    if (this.hostTargetRow) this.hostTargetRow.hidden = !inserting;
+    if (this.hostLinesRow) this.hostLinesRow.hidden = !(inserting && this.hostTarget?.value === 'hubasic');
+    if (this.hostNote) this.hostNote.hidden = !inserting;
+    if (this.progExecBtn) this.progExecBtn.disabled = false;
+    if (inserting) {
+      const error = getHostFormatError(this.hostTarget?.value, selectedFormat, this.getBasSaveFormat());
+      if (this.progExecBtn) this.progExecBtn.disabled = error !== null;
+      const target = this.hostTarget?.value;
+      const hint = target === 'hubasic'
+        ? '同じ文字の DEFCHR$ は置き換えます。他の行との衝突は拒否します。HuBASIC への反映は Ctrl+Z で戻せません。'
+        : target === 'fuzzybasic' && (selectedFormat === 'asm3' || selectedFormat === 'bin3')
+          ? 'ASM タブに挿入します。PCGDEF で読むデータです。'
+          : target === 'slang' && (selectedFormat === 'bin' || selectedFormat === 'bin3')
+            ? 'SLANG タブに ARRAY BYTE として挿入します。'
+            : '選んだ形式のまま挿入します。手動で変えた形式は、利用側で扱ってください。';
+      this.showHostNote(error ?? hint, error !== null);
+    }
+  }
+
+  private getBasSaveFormat(): BasSaveFormat {
+    let format: BasSaveFormat = 'asc';
+    this.basSaveFormatRadios?.forEach(radio => { if (radio.checked) format = radio.value as BasSaveFormat; });
+    return format;
   }
 
   /**
@@ -585,6 +693,7 @@ export class InputPanelManager {
    * PROGRAMMING実行
    */
   private executeProgramming(): void {
+    if (this.programmingBusy) return;
     const format = this.getSelectedFormat();
     const mode = this.getSelectedMode();
 
@@ -595,6 +704,9 @@ export class InputPanelManager {
 
     // バリデーション
     if (isNaN(start) || isNaN(end) || start < 0 || start > 255 || end < 0 || end > 255) {
+      if (mode === 'save' && this.hostEnabled && this.hostDelivery?.value === 'host') {
+        this.showHostNote('文字コードの範囲を00〜FFで正しく指定してください。', true);
+      }
       return;
     }
 
@@ -616,12 +728,35 @@ export class InputPanelManager {
       if (radio.checked) reduceMode = radio.value as ColorReduceMode;
     });
 
-    this.hideAllPanels();
-    this.setMode('edit');
-
     if (mode === 'save') {
-      this.emit({ type: 'file-save', data: { file: { format, start, end, basFormat } } });
+      const inserting = this.hostEnabled && this.hostDelivery?.value === 'host';
+      if (inserting) {
+        const target = this.hostTarget?.value;
+        const lineStart = this.hostLineStart?.value ?? '';
+        const lineStep = this.hostLineStep?.value ?? '';
+        const file = {
+          format, start, end, basFormat, delivery: 'host' as const,
+          target: isPCGTarget(target) ? target : undefined,
+          hubasic: target === 'hubasic' ? {
+            lineStart: /^\d+$/.test(lineStart) ? Number(lineStart) : NaN,
+            lineStep: /^\d+$/.test(lineStep) ? Number(lineStep) : NaN
+          } : undefined
+        };
+        // Unlike legacy file input, host input must never accept a partial hex number.
+        const error = !/^[\da-f]{1,2}$/i.test(this.progStartField?.value ?? '') ||
+          !/^[\da-f]{1,2}$/i.test(this.progEndField?.value ?? '')
+          ? '文字コードの範囲を00〜FFで正しく指定してください。' : validateHostExport(file);
+        if (error) {
+          this.showHostNote(error, true);
+          return;
+        }
+        this.emit({ type: 'file-save', data: { file } });
+      } else {
+        this.closeProgramming();
+        this.emit({ type: 'file-save', data: { file: { format, start, end, basFormat, delivery: 'file' } } });
+      }
     } else {
+      this.closeProgramming();
       this.emit({ type: 'file-load', data: { file: { format, start, end, basLoadMode, reduceMode } } });
     }
   }
@@ -630,8 +765,8 @@ export class InputPanelManager {
    * PROGRAMMINGキャンセル
    */
   cancelProgramming(): void {
-    this.hideAllPanels();
-    this.setMode('edit');
+    if (this.programmingBusy) return;
+    this.closeProgramming();
     this.emit({ type: 'cancel' });
   }
 

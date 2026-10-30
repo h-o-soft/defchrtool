@@ -136,6 +136,14 @@ export class InputHandler {
     this.mode = mode;
   }
 
+  setProgrammingBusy(busy: boolean): void {
+    this.panelManager.setProgrammingBusy(busy);
+  }
+
+  finishHostExport(success: boolean, message: string): void {
+    this.panelManager.finishHostExport(success, message);
+  }
+
   /**
    * 指定したキーが押されているか
    */
