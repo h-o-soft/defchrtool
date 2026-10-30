@@ -448,7 +448,9 @@
       <div class="form-row" id="host-delivery-row" hidden>
         <label class="form-label" for="host-delivery">保存先:</label>
         <select id="host-delivery">
-          <option value="host">X1Pen に挿入</option>
+          <option value="" disabled hidden>保存先を選んでください</option>
+          <option value="host" selected>X1Pen に挿入</option>
+          <option value="copy" id="host-copy-option" disabled hidden>クリップボードにコピー</option>
           <option value="file">ファイル保存</option>
         </select>
       </div>

@@ -10,7 +10,7 @@ import {
   BasSaveFormat
 } from './InputEventTypes';
 import { getRotationTypeFromNumber } from './KeyBindings';
-import { DEFAULT_HUBASIC_LINES, getHostFormatError, getRecommendedFormat, getX1Host, isPCGTarget, validateHostExport } from '../host/X1Host';
+import { DEFAULT_HUBASIC_LINES, getHostFormatError, getRecommendedFormat, getX1Host, hasCopyPCG, isPCGTarget, validateHostExport } from '../host/X1Host';
 
 /** プロンプトコールバック */
 type PromptCallback = (value: string | null) => void;
@@ -70,6 +70,7 @@ export class InputPanelManager {
   private hostLinesRow: HTMLElement | null = null;
   private hostNote: HTMLElement | null = null;
   private hostDelivery: HTMLSelectElement | null = null;
+  private hostCopyOption: HTMLOptionElement | null = null;
   private hostTarget: HTMLSelectElement | null = null;
   private hostLineStart: HTMLInputElement | null = null;
   private hostLineStep: HTMLInputElement | null = null;
@@ -231,6 +232,7 @@ export class InputPanelManager {
     this.hostLinesRow = document.getElementById('host-lines-row');
     this.hostNote = document.getElementById('host-output-note');
     this.hostDelivery = document.getElementById('host-delivery') as HTMLSelectElement;
+    this.hostCopyOption = document.getElementById('host-copy-option') as HTMLOptionElement;
     this.hostTarget = document.getElementById('host-target') as HTMLSelectElement;
     this.hostLineStart = document.getElementById('host-line-start') as HTMLInputElement;
     this.hostLineStep = document.getElementById('host-line-step') as HTMLInputElement;
@@ -360,6 +362,12 @@ export class InputPanelManager {
     this.hideAllPanels();
     if (this.programmingArea) {
       const available = getX1Host() !== null;
+      const copyAvailable = available && hasCopyPCG();
+      if (this.hostCopyOption) {
+        this.hostCopyOption.hidden = !copyAvailable;
+        this.hostCopyOption.disabled = !copyAvailable;
+      }
+      if (!copyAvailable && this.hostDelivery?.value === 'copy') this.hostDelivery.value = '';
       if (available && !this.hostSettingsInitialized) {
         if (this.hostDelivery) this.hostDelivery.value = 'host';
         if (this.hostTarget) this.hostTarget.value = '';
@@ -520,17 +528,24 @@ export class InputPanelManager {
     }
 
     const hostSave = this.hostEnabled && selectedMode === 'save';
-    const inserting = hostSave && this.hostDelivery?.value === 'host';
+    const delivery = this.hostDelivery?.value;
+    const inserting = hostSave && (delivery === 'host' || delivery === 'copy');
+    const missingDelivery = hostSave && delivery !== 'host' && delivery !== 'copy' && delivery !== 'file';
     if (this.hostDeliveryRow) this.hostDeliveryRow.hidden = !hostSave;
     if (this.hostTargetRow) this.hostTargetRow.hidden = !inserting;
     if (this.hostLinesRow) this.hostLinesRow.hidden = !(inserting && this.hostTarget?.value === 'hubasic');
-    if (this.hostNote) this.hostNote.hidden = !inserting;
+    if (this.hostNote) this.hostNote.hidden = !(inserting || missingDelivery);
     if (this.progExecBtn) this.progExecBtn.disabled = false;
-    if (inserting) {
+    if (missingDelivery) {
+      if (this.progExecBtn) this.progExecBtn.disabled = true;
+      this.showHostNote('コピー機能が利用できません。保存先を選び直してください。', true);
+    } else if (inserting) {
       const error = getHostFormatError(this.hostTarget?.value, selectedFormat, this.getBasSaveFormat());
       if (this.progExecBtn) this.progExecBtn.disabled = error !== null;
       const target = this.hostTarget?.value;
-      const hint = target === 'hubasic'
+      const hint = delivery === 'copy'
+        ? 'X1Pen が出力先に合わせてクリップボードにコピーします。エディタの内容は変更しません。'
+        : target === 'hubasic'
         ? '同じ文字の DEFCHR$ は置き換えます。他の行との衝突は拒否します。HuBASIC への反映は Ctrl+Z で戻せません。'
         : target === 'fuzzybasic' && (selectedFormat === 'asm3' || selectedFormat === 'bin3')
           ? 'ASM タブに挿入します。PCGDEF で読むデータです。'
@@ -704,7 +719,7 @@ export class InputPanelManager {
 
     // バリデーション
     if (isNaN(start) || isNaN(end) || start < 0 || start > 255 || end < 0 || end > 255) {
-      if (mode === 'save' && this.hostEnabled && this.hostDelivery?.value === 'host') {
+      if (mode === 'save' && this.hostEnabled && this.hostDelivery?.value !== 'file') {
         this.showHostNote('文字コードの範囲を00〜FFで正しく指定してください。', true);
       }
       return;
@@ -729,13 +744,18 @@ export class InputPanelManager {
     });
 
     if (mode === 'save') {
-      const inserting = this.hostEnabled && this.hostDelivery?.value === 'host';
+      const delivery = this.hostDelivery?.value;
+      if (this.hostEnabled && delivery !== 'host' && delivery !== 'copy' && delivery !== 'file') {
+        this.showHostNote('保存先を選んでください。', true);
+        return;
+      }
+      const inserting = this.hostEnabled && (delivery === 'host' || delivery === 'copy');
       if (inserting) {
         const target = this.hostTarget?.value;
         const lineStart = this.hostLineStart?.value ?? '';
         const lineStep = this.hostLineStep?.value ?? '';
         const file = {
-          format, start, end, basFormat, delivery: 'host' as const,
+          format, start, end, basFormat, delivery: delivery as 'host' | 'copy',
           target: isPCGTarget(target) ? target : undefined,
           hubasic: target === 'hubasic' ? {
             lineStart: /^\d+$/.test(lineStart) ? Number(lineStart) : NaN,

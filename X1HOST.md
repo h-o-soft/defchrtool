@@ -7,6 +7,7 @@ PROGRAMMING パネルで指定した出力を X1Pen へ渡します。外部サ�
 
 ホストは子 iframe の最初の module script より前に同期スクリプトを配置し、その子の
 `window.X1Host = { exportPCG }` を設定します。別のエディタの window.X1Host とは独立しています。
+任意で `copyPCG` と `saveFile` も同じオブジェクトに提供できます。既存の exportPCG だけのホストも利用できます。
 DEFCHR TOOL は自身の window だけを見て任意検出します。P で開く際にも再検出します。
 既に選択した host が消失した場合はエラーとし、出力先を自動で変更しません。
 
@@ -39,8 +40,15 @@ interface PCGExportRequest {
 type PCGExportResult =
   | { ok: true; insertedInto: 'asm' | 'slang' | 'hubasic'; message?: string }
   | { ok: false; code: 'unsupported' | 'invalid' | 'conflict' | 'unavailable'; message: string };
+type PCGCopyResult =
+  | { ok: true; message?: string }
+  | { ok: false; code: 'unsupported' | 'invalid' | 'conflict' | 'unavailable'; message: string };
 
-window.X1Host.exportPCG(request): Promise<PCGExportResult>;
+interface X1Host {
+  exportPCG(request: PCGExportRequest): Promise<PCGExportResult>;
+  copyPCG?(request: PCGExportRequest): Promise<PCGCopyResult>;
+  saveFile?(blob: Blob, fileName: string): void | Promise<void>;
+}
 ```
 
 target はユーザーが明示選択した出力先です。アクティブタブからの推測はしません。
@@ -52,6 +60,42 @@ Blob は既存のファイル保存と同じ artifact です。テキストは `
 iframe と親ではコンストラクタが異なるため `instanceof Blob` 等では検証しません。
 `typeof blob.arrayBuffer === 'function'` 等の形と必要なプロパティで確かめます。
 戻り値も形で検証します。メソッドは X1Host を this として呼びます。
+
+## クリップボードへのコピー
+
+`exportPCG` があるホストで `copyPCG` も関数として提供されている場合、SAVE の保存先に
+「クリップボードにコピー」が加わります。従来ホストは「X1Pen に挿入 / ファイル保存」の2択です。
+X1Host のない単独起動では、従来どおり配信方法欄を隠してファイルを保存します。
+
+コピーも明示的な target・形式・文字コード範囲・HuBASIC 行番号を使い、同じ Blob を渡します。
+対応形式・推奨形式・バイト順は挿入と共通です。ホストが出力先に合わせて整形し、クリップボードに書き込みます。
+DEFCHR TOOL 側からクリップボード API を呼んだり、エディタへ挿入したりはしません。
+コピー成功ではエディタの内容や表示タブを変更しないでください。
+
+コピー成功の結果に `insertedInto` は含めません。挿入成功では従来どおり正しい `insertedInto` が必要です。
+成功 message がなければ「クリップボードにコピーしました。」を表示します。
+拒否や権限エラーは通常の ok:false、例外・不正な応答はコピー結果不明として表示し、自動再送や別経路への出力はしません。
+
+copyPCG も Promise を必ず決着させ、確認ダイアログで待機を止めないでください。
+ユーザー操作との距離を増やさないよう、Blob 生成後は追加の待機を挟まず呼びます。
+応答がない場合はクリップボードの内容を確認したうえで再読み込みしてください。
+再読み込みはコピー取消を保証せず、自動再送もしません。
+
+P で開くたびに能力を再検出します。コピー選択中に能力が消えた場合は保存先を未選択とし、
+SAVE の EXEC を止めて選び直しを求めます。能力が復帰しても自動選択しません。
+LOAD では保存先の未選択状態にかかわらず、従来どおりファイルを読み込めます。
+
+## 親ページでのファイル保存
+
+`saveFile(blob, fileName)` があれば、「ファイル保存」は生成済み Blob と従来のファイル名をこの口に渡します。
+これは exportPCG と独立した任意能力で、saveFile だけを提供するホストでも利用できます。
+ホストは親ページで保存し、同期終了または Promise の解決をもって受理完了とします。戻り値の内容は使用しません。
+失敗は throw/reject で伝えてください。Firefox の iframe ダウンロードを親で扱うための口であり、CSP は変更しません。
+
+saveFile がなければ従来どおり子 iframe 内でダウンロードします。
+一度呼び始めた後の失敗では子 iframe へ再ダウンロードせず、保存状況の確認を促します。
+ファイル保存は従来同様パネルを閉じて実行し、結果はパネル外のステータスへ表示します。
+遅い保存結果が、後から始めた挿入/コピーのパネル・入力・待機表示・busy 状態を変更することはありません。
 
 ## 推奨形式と手動選択
 
@@ -96,20 +140,20 @@ ASM/SLANG は一回の挿入として、Ctrl+Z 一回で戻せます。
 
 ## 成功・失敗・待機
 
-ホストは確認ダイアログで止めず、Promise を必ず決着させます。
+挿入/コピーのホストは確認ダイアログで止めず、Promise を必ず決着させます。
 RUN 中や自動操作中は unavailable を返します。
-ok:true は指定先への適用と通常の保存処理を受け付けた後に返します。
+挿入の ok:true は指定先への適用と通常の保存処理を受け付けた後、コピーの ok:true はクリップボード書込み後に返します。
 ok:false は全検証・衝突検査の結果、何も変更しなかった場合だけ返してください。
 部分書込みはしません。検証後に一回のエディタ更新で適用してください。
 
 message は利用者向け日本語で、そのまま textContent で表示します。
 成功 message が省略された場合は DEFCHR TOOL が文言を表示します。
-不正な応答や例外は反映状態不明として、挿入先の確認を促します。
+不正な応答や例外は結果不明として、挿入先またはクリップボードの確認を促します。
 自動再送・自動ダウンロード・応答タイムアウトによる結果の推測はしません。
 
-送信待ちは出力設定・EXEC・CANCEL と Esc を無効化し、多重送信を防ぎます。
+挿入/コピーの送信待ちは出力設定・EXEC・CANCEL と Esc を無効化し、多重送信を防ぎます。
 成功するとパネルを閉じ、失敗時はパネルと入力を残します。
-応答が戻らない場合は挿入先を確認したうえで iframe/ページを再読み込みしてください。
+応答が戻らない場合は挿入先またはクリップボードを確認したうえで iframe/ページを再読み込みしてください。
 再読み込みは送信取消を保証せず、自動再送もしません。復帰する絵は既存の自動保存済み状態です。
 
 ## 設定と描画データの保存
@@ -129,5 +173,5 @@ origin が異なる GitHub Pages と X1Pen のデータは自動共有しませ�
 
 `npm test` は形式のバイト順・行番号境界・host の検出と応答の形を確認します。
 `npm run test:browser` はビルド済みファイルを配信し、Chrome で単独と同一 origin iframe の
-推奨選択・ファイル保存・エラー表示・待機・設定保持・自動保存復元を確認します。
-ホスト部分はスタブです。X1Pen の実エディタ・言語パーサ・Undo・RUN状態との結合は X1Pen 側で検証します。
+推奨選択・挿入/コピー・親保存・エラー表示・待機の競合・設定保持・自動保存復元を確認します。
+ホスト部分はスタブです。実エディタ・言語パーサ・Undo・RUN状態・クリップボード権限・Firefox/CSPの結合は X1Pen 側で検証します。

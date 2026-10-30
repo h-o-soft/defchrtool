@@ -135,3 +135,71 @@ test('full range and FF character boundaries have the exact byte count', async (
   }
   assert.match(await BasFormat.saveAscii(sample(), 0, 255).text(), /63510DEFCHR\$\(255\)/);
 });
+
+test('copy is optional, preserves this and validates success without insertedInto', async () => {
+  const request = { version: 1, target: 'slang', format: 'bin3', start: 65, end: 66,
+    fileName: 'pcg_x3.bin', blob: BinFormat.save(sample(), 65, 66, true) };
+  globalThis.window = {};
+  assert.equal(host.hasCopyPCG(), false);
+  assert.equal((await host.copyPCGToHost(request)).code, 'unavailable');
+  window.X1Host = { copyPCG: 123 };
+  assert.equal(host.hasCopyPCG(), false);
+  Object.defineProperty(window.X1Host, 'copyPCG', { get() { throw Error('not available'); } });
+  assert.equal(host.hasCopyPCG(), false);
+  let calls = 0;
+  window.X1Host = { async copyPCG(value) {
+    assert.equal(this, window.X1Host);
+    assert.equal(value, request);
+    calls++;
+    return { ok: true, message: 'コピーしました' };
+  } };
+  assert.equal(host.hasCopyPCG(), true);
+  assert.equal((await host.copyPCGToHost(request)).message, 'コピーしました');
+  assert.equal(calls, 1);
+  window.X1Host.copyPCG = async () => ({ ok: true });
+  assert.equal((await host.copyPCGToHost(request)).ok, true);
+  for (const result of [undefined, null, {}, { ok: true, insertedInto: 'slang' },
+    { ok: true, message: 3 }, { ok: false, code: 'wrong', message: '失敗' },
+    { get ok() { throw Error('bad getter'); } }]) {
+    window.X1Host.copyPCG = async () => result;
+    await assert.rejects(host.copyPCGToHost(request), /コピー結果を確認/);
+  }
+  window.X1Host.copyPCG = async () => { throw Error('clipboard rejected'); };
+  await assert.rejects(host.copyPCGToHost(request), /コピー結果を確認/);
+  for (const code of ['unsupported', 'invalid', 'conflict', 'unavailable']) {
+    window.X1Host.copyPCG = async () => ({ ok: false, code, message: '<b>コピーできません</b>' });
+    assert.deepEqual(await host.copyPCGToHost(request), { ok: false, code, message: '<b>コピーできません</b>' });
+  }
+});
+
+test('parent file saving is independent and only absence permits local fallback', async () => {
+  const blob = BinFormat.save(sample(), 65, 66, false);
+  globalThis.window = {};
+  assert.equal(await host.saveFileWithHost(blob, 'pcg.bin'), false);
+  window.X1Host = { saveFile: false };
+  assert.equal(await host.saveFileWithHost(blob, 'pcg.bin'), false);
+  Object.defineProperty(window.X1Host, 'saveFile', { get() { throw Error('missing'); } });
+  assert.equal(await host.saveFileWithHost(blob, 'pcg.bin'), false);
+  let calls = 0;
+  window.X1Host = { saveFile(value, name) {
+    assert.equal(this, window.X1Host);
+    assert.equal(value, blob);
+    assert.equal(name, 'pcg.bin');
+    calls++;
+  } };
+  assert.equal(host.getX1Host(), null); // saveFile-only host
+  assert.equal(await host.saveFileWithHost(blob, 'pcg.bin'), true);
+  assert.equal(calls, 1);
+  let finish;
+  let settled = false;
+  window.X1Host.saveFile = () => new Promise(resolve => { finish = resolve; });
+  const pendingSave = host.saveFileWithHost(blob, 'pcg.bin').then(value => { settled = true; return value; });
+  await Promise.resolve();
+  assert.equal(settled, false);
+  finish();
+  assert.equal(await pendingSave, true);
+  for (const method of [() => { throw Error('sync failure'); }, async () => { throw Error('async failure'); }]) {
+    window.X1Host.saveFile = method;
+    await assert.rejects(host.saveFileWithHost(blob, 'pcg.bin'), /保存を確認できません/);
+  }
+});
