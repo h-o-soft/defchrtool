@@ -267,9 +267,13 @@ try {
   assert.equal(await evaluate(w => w.downloads.length), 0);
   for (const mode of ['throw', 'invalid']) {
     await evaluate((w, mode) => { w.parent.hostMode = mode; }, mode);
+    const before = await requestCount();
+    const downloadsBefore = await evaluate(w => w.downloads.length);
     await click('prog-exec-btn');
-    await until(() => evaluate(w => w.document.getElementById('host-output-note').textContent.includes('反映状況')), mode);
-    assert.equal(await evaluate(w => w.downloads.length), 0);
+    await until(async () => await requestCount() === before + 1 && await evaluate(w =>
+      !w.document.getElementById('prog-exec-btn').disabled &&
+      w.document.getElementById('host-output-note').textContent.includes('応答を確認できません')), mode);
+    assert.equal(await evaluate(w => w.downloads.length), downloadsBefore);
   }
   console.log('PASS errors: invalid numbers, conflict as literal text, exception/invalid reply, no fallback');
 
