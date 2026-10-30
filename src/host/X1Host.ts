@@ -18,12 +18,14 @@ export interface PCGExportRequest {
   hubasic?: HuBasicLines;
 }
 
-export type PCGExportResult =
-  | { ok: true; insertedInto: 'asm' | 'slang' | 'hubasic'; message?: string }
-  | { ok: false; code: 'unsupported' | 'invalid' | 'conflict' | 'unavailable'; message: string };
+export type PCGFailure = { ok: false; code: 'unsupported' | 'invalid' | 'conflict' | 'unavailable'; message: string };
+export type PCGExportResult = { ok: true; insertedInto: 'asm' | 'slang' | 'hubasic'; message?: string } | PCGFailure;
+export type PCGCopyResult = { ok: true; message?: string } | PCGFailure;
 
 export interface X1Host {
   exportPCG(request: PCGExportRequest): Promise<PCGExportResult>;
+  copyPCG?(request: PCGExportRequest): Promise<PCGCopyResult>;
+  saveFile?(blob: Blob, fileName: string): void | Promise<void>;
 }
 
 declare global {
@@ -35,14 +37,24 @@ declare global {
 export const HUBASIC_MAX_LINE = 65529;
 export const DEFAULT_HUBASIC_LINES: HuBasicLines = { lineStart: 60960, lineStep: 10 };
 
-/** The host is injected into this iframe; never search its parent. */
-export function getX1Host(): X1Host | null {
+/** Discover each capability independently, in this iframe only. Capture method and this together. */
+function getHostMethod<K extends keyof X1Host>(name: K): { host: Partial<X1Host>; method: NonNullable<X1Host[K]> } | null {
   try {
     const host = window.X1Host;
-    return host && typeof host.exportPCG === 'function' ? host as X1Host : null;
+    const method = host?.[name];
+    return host && typeof method === 'function' ? { host, method: method as NonNullable<X1Host[K]> } : null;
   } catch {
     return null;
   }
+}
+
+export function getX1Host(): X1Host | null {
+  const bridge = getHostMethod('exportPCG');
+  return bridge ? bridge.host as X1Host : null;
+}
+
+export function hasCopyPCG(): boolean {
+  return getHostMethod('copyPCG') !== null;
 }
 
 export function isPCGTarget(value: unknown): value is PCGTarget {
@@ -73,7 +85,7 @@ export function getHostFormatError(target: unknown, format: FileFormat, basForma
   if (!isPCGTarget(target)) return '出力先を選んでください。';
   if (format === 'image' || (format === 'bas' && basFormat === 'bin') ||
       (target === 'hubasic' && format !== 'bas')) {
-    return 'この形式は挿入できません。ファイル保存を選ぶか、出力先を選び直して推奨形式に変更してください。';
+    return 'この形式はこの出力先に対応していません。ファイル保存を選ぶか、出力先を選び直して推奨形式に変更してください。';
   }
   if (!['bin', 'bin3', 'bas', 'asm', 'asm3'].includes(format) ||
       (format === 'bas' && basFormat !== 'asc')) {
@@ -91,28 +103,60 @@ export function validateHostExport(params: FileParams): string | null {
 }
 
 const UNCERTAIN_RESULT = 'X1Pen の応答を確認できません。出力先の反映状況を確認してから再操作してください。';
+const UNCERTAIN_COPY = 'X1Pen のコピー結果を確認できません。クリップボードの内容を確認してから再操作してください。';
 
-/** Validate across window realms by shape, not instanceof. Never retry here. */
-export async function sendPCGToHost(request: PCGExportRequest): Promise<PCGExportResult> {
-  const host = getX1Host();
-  if (!host) return { ok: false, code: 'unavailable', message: 'X1Pen との接続がありません。設定を確認してください。' };
-
-  let result: unknown;
+/** Validate across realms by shape, with distinct success rules. Never retry or fall back. */
+async function callPCGHost<T>(
+  name: 'exportPCG' | 'copyPCG', request: PCGExportRequest,
+  success: (value: Record<string, unknown>) => T | undefined, uncertain: string
+): Promise<T | PCGFailure> {
+  const bridge = getHostMethod(name);
+  if (!bridge) return { ok: false, code: 'unavailable', message: name === 'copyPCG'
+    ? 'X1Pen のコピー機能が利用できません。保存先を選び直してください。'
+    : 'X1Pen との接続がありません。設定を確認してください。' };
   try {
-    result = await host.exportPCG(request);
+    const result: unknown = await bridge.method.call(bridge.host, request);
+    if (typeof result !== 'object' || result === null) throw new Error(uncertain);
+    const value = result as Record<string, unknown>;
+    const parsed = success(value);
+    if (parsed) return parsed;
+    if (value.ok === false && typeof value.code === 'string' &&
+        ['unsupported', 'invalid', 'conflict', 'unavailable'].includes(value.code) && typeof value.message === 'string') {
+      return { ok: false, code: value.code as PCGFailure['code'], message: value.message };
+    }
+    throw new Error(uncertain);
   } catch {
-    throw new Error(UNCERTAIN_RESULT);
+    throw new Error(uncertain);
   }
-  if (typeof result !== 'object' || result === null) throw new Error(UNCERTAIN_RESULT);
-  const value = result as Record<string, unknown>;
-  const expected = request.target === 'fuzzybasic' ? 'asm' : request.target;
-  if (value.ok === true && value.insertedInto === expected &&
-      (value.message === undefined || typeof value.message === 'string')) {
-    return { ok: true, insertedInto: expected, message: value.message as string | undefined };
+}
+
+export function sendPCGToHost(request: PCGExportRequest): Promise<PCGExportResult> {
+  return callPCGHost('exportPCG', request, value => {
+    const expected = request.target === 'fuzzybasic' ? 'asm' : request.target;
+    if (value.ok === true && value.insertedInto === expected &&
+        (value.message === undefined || typeof value.message === 'string')) {
+      return { ok: true as const, insertedInto: expected, message: value.message as string | undefined };
+    }
+  }, UNCERTAIN_RESULT);
+}
+
+export function copyPCGToHost(request: PCGExportRequest): Promise<PCGCopyResult> {
+  return callPCGHost('copyPCG', request, value => {
+    if (value.ok === true && value.insertedInto === undefined &&
+        (value.message === undefined || typeof value.message === 'string')) {
+      return { ok: true as const, message: value.message as string | undefined };
+    }
+  }, UNCERTAIN_COPY);
+}
+
+/** Only absence permits the existing child download. Once invoked, errors must propagate. */
+export async function saveFileWithHost(blob: Blob, fileName: string): Promise<boolean> {
+  const bridge = getHostMethod('saveFile');
+  if (!bridge) return false;
+  try {
+    await bridge.method.call(bridge.host, blob, fileName);
+    return true;
+  } catch {
+    throw new Error('X1Pen でのファイル保存を確認できません。保存状況を確認してから再操作してください。');
   }
-  if (value.ok === false && typeof value.code === 'string' &&
-      ['unsupported', 'invalid', 'conflict', 'unavailable'].includes(value.code) && typeof value.message === 'string') {
-    return { ok: false, code: value.code as 'unsupported' | 'invalid' | 'conflict' | 'unavailable', message: value.message };
-  }
-  throw new Error(UNCERTAIN_RESULT);
 }

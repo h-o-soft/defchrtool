@@ -51,7 +51,7 @@ export interface FileParams {
   basLoadMode?: 'start' | 'original';
   reduceMode?: ColorReduceMode;
   basFormat?: BasSaveFormat;
-  delivery?: 'file' | 'host';
+  delivery?: 'file' | 'host' | 'copy';
   target?: PCGTarget;
   hubasic?: HuBasicLines;
 }

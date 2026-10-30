@@ -11,7 +11,7 @@ import { ScreenLayout } from './renderer/ScreenLayout';
 import { PCGData } from './core/PCGData';
 import { InputHandler, InputEvent, ColorReduceMode, FileFormat } from './input/InputHandler';
 import type { FileParams } from './input/InputEventTypes';
-import { isPCGTarget, isValidRange, sendPCGToHost, validateHostExport } from './host/X1Host';
+import { copyPCGToHost, isPCGTarget, isValidRange, saveFileWithHost, sendPCGToHost, validateHostExport } from './host/X1Host';
 import { X1_COLORS, EditMode, X1Color } from './core/types';
 import { STATUS_MESSAGE_DURATION } from './core/constants';
 import { BinFormat, BasFormat, ImageFormat, AsmFormat } from './io';
@@ -393,7 +393,8 @@ class DEFCHRApp {
   private async handleFileSave(params: FileParams): Promise<void> {
     if (this.hostExportBusy) return;
     const { format, start, end, basFormat } = params;
-    const toHost = params.delivery === 'host';
+    const copying = params.delivery === 'copy';
+    const toHost = params.delivery === 'host' || copying;
     const target = params.target;
     const hubasic = params.hubasic ? { ...params.hubasic } : undefined;
     if (toHost) {
@@ -401,6 +402,9 @@ class DEFCHRApp {
       this.inputHandler.setProgrammingBusy(true);
     }
     try {
+      if (params.delivery !== undefined && !['host', 'copy', 'file'].includes(params.delivery)) {
+        throw new Error('保存先を選んでください。');
+      }
       if (format !== 'image' && !isValidRange(start, end)) throw new Error('Invalid character range');
       if (toHost) {
         const error = validateHostExport(params);
@@ -446,16 +450,17 @@ class DEFCHRApp {
       }
 
       if (toHost && isPCGTarget(target)) {
-        const result = await sendPCGToHost({
-          version: 1, target, format, start, end, fileName, blob,
+        const request = {
+          version: 1 as const, target, format, start, end, fileName, blob,
           ...(format === 'bas' ? { basFormat } : {}),
           ...(target === 'hubasic' ? { hubasic } : {})
-        });
-        const message = result.ok ? result.message ?? 'X1Pen に挿入しました。' : result.message;
+        };
+        const result = copying ? await copyPCGToHost(request) : await sendPCGToHost(request);
+        const message = result.ok ? result.message ?? (copying ? 'クリップボードにコピーしました。' : 'X1Pen に挿入しました。') : result.message;
         this.inputHandler.finishHostExport(result.ok, message);
         this.showStatusMessage(message, !result.ok);
       } else {
-        this.downloadBlob(blob, fileName);
+        if (!(await saveFileWithHost(blob, fileName))) this.downloadBlob(blob, fileName);
         this.showStatusMessage(`Saved: ${fileName}`);
       }
     } catch (e) {

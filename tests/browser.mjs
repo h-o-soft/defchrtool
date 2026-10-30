@@ -23,6 +23,7 @@ window.requests = [];
 window.hostCalls = 0;
 window.hostMode = 'success';
 window.host = { async exportPCG(request) {
+  delete window.releaseHost;
   window.hostCalls++;
   const record = { ...request, blob: undefined,
     crossRealm: !(request.blob instanceof Blob),
@@ -36,6 +37,40 @@ window.host = { async exportPCG(request) {
   return { ok: true, insertedInto: request.target === 'fuzzybasic' ? 'asm' : request.target,
     message: 'ホストに反映しました' };
 } };
+window.copyCalls = 0;
+window.copyRequests = [];
+window.copyMode = 'success';
+window.fileCalls = 0;
+window.fileRequests = [];
+window.fileMode = 'success';
+window.installCopy = () => { window.host.copyPCG = async function(request) {
+  delete window.releaseCopy;
+  window.copyCalls++;
+  window.copyThis = this === window.host;
+  const record = { ...request, blob: undefined, crossRealm: !(request.blob instanceof Blob),
+    bytes: [...new Uint8Array(await request.blob.arrayBuffer())], text: await request.blob.text() };
+  window.copyRequests.push(record);
+  if (window.copyMode === 'throw') throw Error('copy exception');
+  if (window.copyMode === 'invalid') return { ok: true, insertedInto: 'asm' };
+  if (window.copyMode === 'pending') await new Promise(resolve => { window.releaseCopy = resolve; });
+  if (window.copyMode === 'conflict') return { ok: false, code: 'conflict', message: '<b>コピーできません</b>' };
+  return window.copyMode === 'default' ? { ok: true } : { ok: true, message: 'ホストでコピーしました' };
+}; };
+window.installSave = () => { window.host.saveFile = async function(blob, fileName) {
+  delete window.resolveFile; delete window.rejectFile;
+  window.fileCalls++;
+  window.fileThis = this === window.host;
+  if (window.fileMode === 'throw') throw Error('save exception');
+  window.fileRequests.push({ fileName, crossRealm: !(blob instanceof Blob), bytes: [...new Uint8Array(await blob.arrayBuffer())] });
+  if (window.fileMode === 'reject') throw Error('save rejected');
+  if (window.fileMode === 'pending') await new Promise((resolve, reject) => {
+    window.resolveFile = resolve; window.rejectFile = reject;
+  });
+}; };
+const capabilities = new URLSearchParams(location.search);
+if (capabilities.has('copy')) window.installCopy();
+if (capabilities.has('save') || capabilities.has('save-only')) window.installSave();
+if (capabilities.has('save-only')) delete window.host.exportPCG;
 </script><iframe id="tool" src="/defchrtool/index.html?host" style="width:640px;height:700px"></iframe>`;
 
 const server = createServer(async (req, res) => {
@@ -115,6 +150,9 @@ const radio = (name, value) => evaluate((w, name, value) => {
 const panelVisible = () => evaluate(w => w.document.getElementById('programming-area').classList.contains('visible'));
 const requestCount = () => evaluate(w => w.parent.requests.length);
 const hostCallCount = () => evaluate(w => w.parent.hostCalls);
+const copyCallCount = () => evaluate(w => w.parent.copyCalls);
+const deliveryOptions = () => evaluate(w => [...w.document.getElementById('host-delivery').options]
+  .filter(option => !option.hidden && !option.disabled).map(option => option.value));
 async function openPanel() {
   await key('KeyP', 'p');
   await until(panelVisible, 'PROGRAMMING opens');
@@ -185,6 +223,7 @@ try {
     const row = w.document.getElementById('host-delivery-row');
     return row ? w.getComputedStyle(row).display : 'none';
   }), 'none');
+  assert.deepEqual(await deliveryOptions(), ['host', 'file']);
   const snapshots = {};
   for (const [format, basFormat] of [['image'], ['bin'], ['bin3'], ['bas', 'asc'], ['bas', 'bin'], ['asm'], ['asm3']]) {
     if (!(await panelVisible())) await openPanel();
@@ -209,6 +248,7 @@ try {
   if (process.env.DEFCHR_STANDALONE_ONLY !== '1') {
   await navigate('/fixture', true);
   await openPanel();
+  assert.deepEqual(await deliveryOptions(), ['host', 'file']);
   assert.equal(await evaluate(w => w.document.getElementById('prog-exec-btn').disabled), true);
   assert.equal(await evaluate(w => w.document.getElementById('host-target').value), '');
   for (const [target, format] of [['fuzzybasic', 'asm3'], ['asm', 'asm3'], ['slang', 'bin3'], ['hubasic', 'bas']]) {
@@ -374,6 +414,157 @@ try {
   await until(async () => await requestCount() === 1 && !(await panelVisible()), 'startup export recovers without a lock');
   assert.deepEqual(exceptions, []);
   console.log('PASS startup: export before font load does not leave a busy panel');
+
+  await navigate('/fixture?copy&save', true);
+  await openPanel();
+  assert.deepEqual(await deliveryOptions(), ['host', 'copy', 'file']);
+  await select('host-delivery', 'copy');
+  assert.equal(await evaluate(w => w.document.getElementById('prog-exec-btn').disabled), true);
+  for (const [target, format] of [['fuzzybasic', 'asm3'], ['asm', 'asm3'], ['slang', 'bin3'], ['hubasic', 'bas']]) {
+    if (!(await panelVisible())) await openPanel();
+    await select('host-target', target);
+    await field('prog-start', '41'); await field('prog-end', '42');
+    assert.doesNotMatch(await evaluate(w => w.document.getElementById('host-output-note').textContent), /Ctrl\+Z/);
+    const before = await copyCallCount();
+    await click('prog-exec-btn');
+    await until(async () => await copyCallCount() === before + 1 && !(await panelVisible()), `${target} copied`);
+    const request = await evaluate(w => w.parent.copyRequests.at(-1));
+    assert.equal(request.target, target); assert.equal(request.format, format);
+    assert.equal(request.version, 1); assert.equal(request.start, 65); assert.equal(request.end, 66);
+    assert.deepEqual(request.bytes, snapshots[format === 'bas' ? 'basasc' : format].bytes);
+    assert.equal(request.crossRealm, true);
+    assert.equal(await evaluate(w => w.parent.copyThis), true);
+    assert.equal(await hostCallCount(), 0);
+    assert.equal(await evaluate(w => w.parent.fileCalls), 0);
+    assert.equal(await evaluate(w => w.downloads.length), 0);
+  }
+  console.log('PASS copy: optional route, four targets, same Blob/metadata, no editor insert or file download');
+
+  await openPanel();
+  await field('host-line-start', '200'); await field('host-line-step', '5');
+  await select('host-delivery', 'host'); await select('host-delivery', 'copy');
+  assert.equal(await evaluate(w => w.document.getElementById('host-line-start').value), '200');
+  await evaluate(w => { delete w.X1Host.copyPCG; });
+  const beforeMissing = await copyCallCount();
+  await click('prog-exec-btn');
+  await until(() => evaluate(w => w.document.getElementById('host-output-note').textContent.includes('コピー機能が利用できません')), 'lost copy unavailable');
+  assert.equal(await copyCallCount(), beforeMissing);
+  assert.equal(await hostCallCount(), 0);
+  assert.equal(await evaluate(w => w.downloads.length), 0);
+  await key('Escape'); await openPanel();
+  assert.deepEqual(await deliveryOptions(), ['host', 'file']);
+  assert.equal(await evaluate(w => w.document.getElementById('host-delivery').value), '');
+  assert.equal(await evaluate(w => w.document.getElementById('prog-exec-btn').disabled), true);
+  await radio('prog-format', 'bin3'); await radio('prog-mode', 'load');
+  assert.equal(await evaluate(w => w.document.getElementById('prog-exec-btn').disabled), false);
+  await evaluate(w => {
+    w.loadPrompts = 0;
+    const original = w.HTMLInputElement.prototype.click;
+    w.HTMLInputElement.prototype.click = function() {
+      if (this.type === 'file') w.loadPrompts++; else original.call(this);
+    };
+  });
+  await click('prog-exec-btn');
+  assert.equal(await evaluate(w => w.loadPrompts), 1);
+  assert.equal(await panelVisible(), false);
+  await evaluate(w => w.parent.installCopy());
+  await openPanel();
+  assert.deepEqual(await deliveryOptions(), ['host', 'copy', 'file']);
+  assert.equal(await evaluate(w => w.document.getElementById('host-delivery').value), '');
+  await select('host-delivery', 'copy'); await select('host-target', 'asm');
+  for (const mode of ['throw', 'invalid', 'conflict', 'default']) {
+    await evaluate((w, mode) => { w.parent.copyMode = mode; }, mode);
+    const before = await copyCallCount();
+    await click('prog-exec-btn');
+    await until(async () => await copyCallCount() === before + 1 && await evaluate((w, mode) => mode === 'default'
+      ? !w.document.getElementById('programming-area').classList.contains('visible') &&
+        w.document.getElementById('status').textContent === 'クリップボードにコピーしました。'
+      : !w.document.getElementById('prog-exec-btn').disabled &&
+        w.document.getElementById('host-output-note').textContent.includes(mode === 'conflict' ? 'コピーできません' : 'コピー結果を確認できません'), mode), `copy ${mode}`);
+    assert.equal(await hostCallCount(), 0);
+    assert.equal(await evaluate(w => w.downloads.length), 0);
+    assert.equal(await evaluate(w => w.document.querySelector('#host-output-note b') === null), true);
+  }
+  console.log('PASS copy failures: safe messages, no fallback, capability removal/reappearance, LOAD from an unset route');
+
+  // Late file completions must never clear the busy state of a newer insert/copy.
+  for (const operation of ['host', 'copy']) {
+    for (const failSave of [false, true]) {
+      await openPanel(); await select('host-delivery', 'file'); await radio('prog-format', 'bin');
+      await field('prog-start', '41'); await field('prog-end', '42');
+      await evaluate(w => { w.parent.fileMode = 'pending'; w.document.getElementById('status').textContent = ''; });
+      const beforeFiles = await evaluate(w => w.parent.fileCalls);
+      await click('prog-exec-btn');
+      await until(() => evaluate((w, count) => w.parent.fileCalls === count + 1 &&
+        typeof w.parent.resolveFile === 'function', beforeFiles), 'parent file awaits');
+      assert.equal(await panelVisible(), false);
+      assert.equal(await evaluate(w => w.document.getElementById('status').textContent), '');
+      await openPanel(); await select('host-delivery', operation); await select('host-target', 'asm');
+      await evaluate((w, operation) => { w.parent[operation === 'copy' ? 'copyMode' : 'hostMode'] = 'pending'; }, operation);
+      const before = operation === 'copy' ? await copyCallCount() : await hostCallCount();
+      await click('prog-exec-btn');
+      await until(() => evaluate((w, operation, before) =>
+        w.parent[operation === 'copy' ? 'copyCalls' : 'hostCalls'] === before + 1 &&
+        typeof w.parent[operation === 'copy' ? 'releaseCopy' : 'releaseHost'] === 'function', operation, before), 'new output pending');
+      await evaluate((w, failSave) => {
+        if (failSave) w.parent.rejectFile(Error('late failure')); else w.parent.resolveFile();
+      }, failSave);
+      await until(() => evaluate((w, failSave) => w.document.getElementById('status').textContent.includes(
+        failSave ? '保存を確認できません' : 'Saved:'), failSave), 'parent result visible outside panel');
+      assert.equal(await evaluate(w => w.document.getElementById('prog-exec-btn').disabled), true);
+      assert.match(await evaluate(w => w.document.getElementById('host-output-note').textContent), /送信中/);
+      assert.equal(await evaluate(w => w.document.getElementById('host-target').value), 'asm');
+      await click('prog-exec-btn'); await key('Escape'); await click('prog-cancel-btn'); await key('KeyP', 'p');
+      assert.equal(await panelVisible(), true);
+      assert.equal(operation === 'copy' ? await copyCallCount() : await hostCallCount(), before + 1);
+      assert.equal(await evaluate(w => w.downloads.length), 0);
+      await evaluate((w, operation) => w.parent[operation === 'copy' ? 'releaseCopy' : 'releaseHost'](), operation);
+      await until(async () => !(await panelVisible()), 'output completed once');
+    }
+  }
+  console.log('PASS concurrency: late save resolve/reject preserves insert/copy waiting UI and single-send lock');
+
+  await navigate('/fixture?save', true);
+  await openPanel(); await select('host-delivery', 'file');
+  assert.deepEqual(await deliveryOptions(), ['host', 'file']);
+  for (const [format, basFormat] of [['image'], ['bin'], ['bin3'], ['bas', 'asc'], ['bas', 'bin'], ['asm'], ['asm3']]) {
+    if (!(await panelVisible())) await openPanel();
+    await radio('prog-format', format);
+    if (basFormat) await radio('bas-save-format', basFormat);
+    await field('prog-start', '41'); await field('prog-end', '42');
+    const before = await evaluate(w => w.parent.fileCalls);
+    await click('prog-exec-btn');
+    const expected = snapshots[format + (basFormat ?? '')];
+    await until(() => evaluate((w, count, name) => w.parent.fileCalls === count + 1 &&
+      w.document.getElementById('status').textContent === 'Saved: ' + name, before, expected.name), `parent saves ${format}`);
+    const saved = await evaluate(w => w.parent.fileRequests.at(-1));
+    assert.equal(saved.fileName, expected.name); assert.deepEqual(saved.bytes, expected.bytes);
+    assert.equal(saved.crossRealm, true); assert.equal(await evaluate(w => w.parent.fileThis), true);
+    assert.equal(await evaluate(w => w.downloads.length), 0);
+    assert.equal(await hostCallCount(), 0);
+  }
+  for (const mode of ['throw', 'reject']) {
+    await openPanel();
+    await evaluate((w, mode) => { w.parent.fileMode = mode; w.document.getElementById('status').textContent = ''; }, mode);
+    const before = await evaluate(w => w.parent.fileCalls);
+    await click('prog-exec-btn');
+    await until(() => evaluate((w, before) => w.parent.fileCalls === before + 1 &&
+      w.document.getElementById('status').textContent.includes('保存を確認できません'), before), `parent save ${mode}`);
+    assert.equal(await panelVisible(), false);
+    assert.equal(await evaluate(w => w.downloads.length), 0);
+  }
+  await evaluate(w => { delete w.X1Host.saveFile; });
+  await openPanel(); await click('prog-exec-btn');
+  await until(() => evaluate(w => w.downloads.length === 1), 'absent saveFile uses the original child download');
+  await navigate('/fixture?save-only', true);
+  await openPanel();
+  assert.equal(await evaluate(w => w.document.getElementById('host-delivery-row').hidden), true);
+  await click('prog-exec-btn');
+  await until(() => evaluate(w => w.parent.fileRequests.length === 1 &&
+    w.document.getElementById('status').textContent.startsWith('Saved:')), 'saveFile without exportPCG');
+  assert.equal(await evaluate(w => w.downloads.length), 0);
+  assert.deepEqual(exceptions, []);
+  console.log('PASS parent saves: seven formats, failures visible after panel close, optional and independent capability');
   }
   console.log(`Browser checks passed (${buildDir}).`);
 } finally {
