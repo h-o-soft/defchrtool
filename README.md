@@ -232,13 +232,22 @@ npm run test:browser
 
 ### 使用フォント
 
-本ツールでは以下のフォントを使用しています：
+同梱の `public/assets/fonts/X1font.png` は、次の X1互換フォント（美咲フォント由来）です。
 
 - **X1互換フォント**: [meister68k/X1_compatible_font](https://github.com/meister68k/X1_compatible_font) by Meister氏
 - **美咲フォント**: [littlelimit.net](https://littlelimit.net/misaki.htm) by 門真なむ氏
 
-X1互換フォントは美咲フォントを元に作成されており、美咲フォントライセンスに従っています。
+このフォントには、このリポジトリのコードの MIT ライセンスとは別に、美咲フォントの利用条件が適用されます。
 詳細は[美咲フォントライセンス](https://littlelimit.net/font.htm#license)をご確認ください。
+
+## 作成について
+
+このプロジェクトは、SHARP X1用の「DEFCHR TOOL」の動作を参考にしつつ、元のソースコードは見ずに作成しました。
+元のツールの作者とは関係のないプロジェクトです。
+
+以下の MIT ライセンスは、このリポジトリのコードに適用します。元のツールや使用フォントのライセンスを示すものではありません。
+フォントの利用条件は、上の「使用フォント」をご確認ください。
+MIT の本文は以下と [LICENSE](LICENSE) に載せています。
 
 ## ライセンス
 
