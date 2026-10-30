@@ -532,7 +532,7 @@ export class InputPanelManager {
       const target = this.hostTarget?.value;
       const hint = target === 'hubasic'
         ? '同じ文字の DEFCHR$ は置き換えます。他の行との衝突は拒否します。HuBASIC への反映は Ctrl+Z で戻せません。'
-        : target === 'fuzzybasic'
+        : target === 'fuzzybasic' && (selectedFormat === 'asm3' || selectedFormat === 'bin3')
           ? 'ASM タブに挿入します。PCGDEF で読むデータです。'
           : target === 'slang' && (selectedFormat === 'bin' || selectedFormat === 'bin3')
             ? 'SLANG タブに ARRAY BYTE として挿入します。'

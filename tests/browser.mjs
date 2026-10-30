@@ -20,8 +20,10 @@ let fontWaiting = false;
 
 const fixture = `<!doctype html><meta charset="utf-8"><script>
 window.requests = [];
+window.hostCalls = 0;
 window.hostMode = 'success';
 window.host = { async exportPCG(request) {
+  window.hostCalls++;
   const record = { ...request, blob: undefined,
     crossRealm: !(request.blob instanceof Blob),
     bytes: [...new Uint8Array(await request.blob.arrayBuffer())],
@@ -112,6 +114,7 @@ const radio = (name, value) => evaluate((w, name, value) => {
 }, name, value);
 const panelVisible = () => evaluate(w => w.document.getElementById('programming-area').classList.contains('visible'));
 const requestCount = () => evaluate(w => w.parent.requests.length);
+const hostCallCount = () => evaluate(w => w.parent.hostCalls);
 async function openPanel() {
   await key('KeyP', 'p');
   await until(panelVisible, 'PROGRAMMING opens');
@@ -249,9 +252,9 @@ try {
   assert.equal(await evaluate(w => w.document.getElementById('host-line-start').value), '100');
   for (const invalid of ['', '0', '-1', '10x', '1.5', '65529']) {
     await field('host-line-start', invalid);
-    const before = await requestCount();
+    const before = await hostCallCount();
     await click('prog-exec-btn');
-    assert.equal(await requestCount(), before);
+    assert.equal(await hostCallCount(), before);
     assert.equal(await panelVisible(), true);
   }
   await field('host-line-start', '100');
@@ -292,6 +295,14 @@ try {
   await click('prog-exec-btn');
   await until(() => evaluate(w => w.downloads.length === 1), 'file route still supports PNG');
   await openPanel(); await select('host-delivery', 'host'); await select('host-target', 'fuzzybasic');
+  for (const format of ['bin', 'asm', 'bas']) {
+    await radio('prog-format', format);
+    assert.doesNotMatch(await evaluate(w => w.document.getElementById('host-output-note').textContent), /PCGDEF/);
+  }
+  for (const format of ['bin3', 'asm3']) {
+    await radio('prog-format', format);
+    assert.match(await evaluate(w => w.document.getElementById('host-output-note').textContent), /PCGDEF/);
+  }
   await field('prog-start', '41'); await field('prog-end', '42');
   await evaluate(w => { w.parent.hostMode = 'pending'; });
   const beforePending = await requestCount();

@@ -11,8 +11,10 @@ DEFCHR TOOL は自身の window だけを見て任意検出します。P で開�
 既に選択した host が消失した場合はエラーとし、出力先を自動で変更しません。
 
 X1Pen は採用する commit SHA を固定し、`npm ci` → `npx vite build --base ./` でビルドします。
-資産一式と LICENSE、commit/sha256 を記載する source.json を `assets/defchrtool/` へ取り込み、
+資産一式、README.md、commit/sha256 を記載する source.json を `assets/defchrtool/` へ取り込み、
 配布時は `dist/defchrtool/`、同じ origin の `/defchrtool/index.html` へ配置します。
+このリポジトリの MIT 本文は README.md の「ライセンス」節にあり、独立した LICENSE ファイルはありません。
+X1Pen 側で LICENSE を同梱する場合は同節から作成し、README.md のフォント利用条件の参照も保持してください。
 上流 GitHub Pages 用の base は `/defchrtool/` のままです。フォントも BASE_URL 配下から読みます。
 
 ホストはタブ初回表示時に iframe を一度作り、切替時は非表示にして同じインスタンスを維持します。
