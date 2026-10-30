@@ -288,7 +288,7 @@ try {
   await delay(650);
   const editSaved = await evaluate(w => w.localStorage.getItem('defchr-editbuffer'));
   assert.notEqual(editSaved, editBefore);
-  await evaluate(w => { w.location.reload(); });
+  await evaluate(w => { w.__ready = false; w.location.reload(); });
   await until(() => evaluate(w => w.__ready), 'iframe reload');
   assert.equal(await evaluate(w => w.localStorage.getItem('defchr-pcgdata')), storedBefore);
   assert.equal(await evaluate(w => w.localStorage.getItem('defchr-editbuffer')), editSaved);
